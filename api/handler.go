@@ -46,11 +46,6 @@ func RouteHandler(r *gin.Engine) {
 			rg.POST("shifts/end", controllers.EndShift)	//ShiftController.go
 			
 			//========================================
-			// MEMBER
-			//========================================
-			rg.GET("members", controllers.ListMembersStore) //MemberController.go
-			
-			//========================================
 			// PRODUCT
 			//========================================
 			rg.GET("products-by-store", controllers.ListProductsOfStore) //ProductController.go
@@ -84,6 +79,7 @@ func RouteHandler(r *gin.Engine) {
 		//========================================
 		// MEMBER
 		//========================================
+		protected.GET("members", controllers.ListAllMembers) //MemberController.go
 		protected.GET("members/:id", controllers.DetailMember) //MemberController.go
 		protected.POST("members", controllers.CreateMember) //MemberController.go
 		protected.PUT("members/:id", controllers.UpdateMember) //MemberController.go
@@ -95,10 +91,7 @@ func RouteHandler(r *gin.Engine) {
 			// PRODUCT
 			//========================================
 			rg.GET("products", controllers.ListAllProducts) //ProductController.go
-			//========================================
-			// MEMBER
-			//========================================
-			rg.GET("members/all", controllers.ListAllMembers) //MemberController.go
+			
 			//========================================
 			// TRANSACTION
 			//========================================

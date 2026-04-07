@@ -4,7 +4,7 @@ import "time"
 
 type Member struct {
 	ID              uint       `json:"id" gorm:"primaryKey;autoIncrement"`
-	StoreID			uint64	   `json:"store_id" gorm:"index"`
+	StoreID			*uint64	   `json:"store_id" gorm:"index"`
 	Code            string     `json:"code" gorm:"size:15;not null"`
 	Name        	string     `json:"name" gorm:"size:255;not null"`
 	Email           string     `json:"email" gorm:"size:255;unique;not null"`
