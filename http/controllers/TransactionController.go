@@ -527,7 +527,7 @@ func CheckoutTransaction(c *gin.Context) {
 
     c.JSON(http.StatusOK, response.Success("Transaction saved", tr))
 }
-func AllTransactions(c *gin.Context) {
+func GetTransactionHistories(c *gin.Context) {
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
     limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
@@ -542,35 +542,41 @@ func AllTransactions(c *gin.Context) {
         TotalQuantity int `json:"total_quantity"`
         Kasir string `json:"kasir"`
         StoreName string `json:"store_name"`
+        Subtotal float64 `json:"subtotal"`
+        Tax float64 `json:"tax"`
         TotalAmount float64 `json:"total_amount"`
         Status string `json:"status"`
-        TransactionDate string `json:"transaction_date"`
+        PaymentMethod string `json:"payment_method"`
         CreatedAt time.Time `json:"created_at"`
     }
 
     var rows []txRow
 
-    baseWhere := ""
-    args := []interface{}{}
+    now := helpers.GetCurentTime()
+    // awal hari ini (00:00:00)
+    startDate := time.Date(
+        now.Year(), now.Month(), now.Day(),
+        0, 0, 0, 0,
+        now.Location(),
+    )
+    // akhir hari ini (23:59:59)
+    endDate := startDate.Add(24*time.Hour - time.Nanosecond)
+
+    fmt.Print(startDate, endDate)
+    baseWhere := "WHERE t.created_at >= ? AND t.created_at <= ?"
+    args := []interface{}{startDate, endDate}
     if q != "" {
         like := "%"+q+"%"
-        baseWhere = "WHERE (t.invoice LIKE ? OR u.name LIKE ? OR s.store_name LIKE ?)"
+        baseWhere += "AND (t.invoice LIKE ? OR u.name LIKE ? OR s.store_name LIKE ?)"
         args = append(args, like, like, like)
     }
     
     // count
     var total int64
     countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM transactions t LEFT JOIN users u ON u.id = t.user_id LEFT JOIN store_profiles s ON s.id = t.store_id %s`, baseWhere)
-    if len(args) > 0 {
-        if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
-            helpers.ErrorResponse(c, 500, "Failed to count transaction", err)
-            return
-        }
-    } else {
-        if err := config.DB.Raw(countSQL).Scan(&total).Error; err != nil {
-            helpers.ErrorResponse(c, 500, "Failed to count transaction", err)
-            return
-        }
+    if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to count transaction", err)
+        return
     }
 
     dataSQL := fmt.Sprintf(`
@@ -581,9 +587,11 @@ func AllTransactions(c *gin.Context) {
             t.total_quantity,
             COALESCE(u.name, 'Unknown') AS kasir,
             COALESCE(s.store_name, '') AS store_name,
+            t.subtotal,
+            COALESCE(t.subtotal * t.tax / 100, 0) AS tax,
             t.total_amount,
             t.status, 
-            t.transaction_date, 
+            t.payment_method, 
             t.created_at 
         FROM transactions t 
         LEFT JOIN users u ON u.id = t.user_id 
@@ -598,78 +606,160 @@ func AllTransactions(c *gin.Context) {
 
     c.JSON(http.StatusOK, gin.H{
         "success": true,
-        "message": "List semua transaksi",
+        "message": "List riwayat transaksi",
         "resource": gin.H{
             "data": rows, 
             "pagination": pagination,
         },
     })
 }
-func TransactionsByShift(c *gin.Context) {
-    shiftIDParam := c.Param("shift_id")
-    shiftID, err := strconv.ParseUint(shiftIDParam, 10, 64)
-    if err != nil { 
-        helpers.ErrorResponse(c, 400, "Invalid shift id", err);
-        return 
+func DetailTransaction(c *gin.Context) {
+    idParam := c.Param("id")
+    id, err := strconv.ParseUint(idParam, 10, 64)
+    if err != nil {
+        helpers.ErrorResponse(c, 400, "Invalid transaction id", err)
+        return
     }
 
-    q := strings.TrimSpace(c.DefaultQuery("q", ""))
-    page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
-    
-    if page < 1 { page = 1 }
-    offset := (page-1)*limit
+    var tx models.Transaction
+    if err := config.DB.Preload("User").
+        Preload("Store").Preload("Items").
+        First(&tx, id).Error; err != nil {
+        helpers.ErrorResponse(c, 404, "Transaction not found", err)
+        return
+    }
 
-    type txRow struct {
-        ID uint64 `json:"id"`
-        Invoice string `json:"invoice"`
-        TotalItem int `json:"total_item"`
-        TotalQuantity int `json:"total_quantity"`
+    c.JSON(http.StatusOK, gin.H{
+        "success": true,
+        "message": "Detail transaksi",
+        "resource": tx,
+    })
+}
+func DetailTransactionsShift(c *gin.Context) {
+    shiftIDParam := c.Param("shift_id")
+    shiftID, err := strconv.ParseUint(shiftIDParam, 10, 64)
+    if err != nil {
+        helpers.ErrorResponse(c, 400, "Invalid shift id", err)
+        return
+    }
+
+    // q := strings.TrimSpace(c.DefaultQuery("q", ""))
+    // page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+    // limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
+    
+    // if page < 1 { page = 1 }
+    // offset := (page-1)*limit
+
+    var shift models.Shift
+    if err := config.DB.
+        Preload("UserOpen").
+        Preload("UserClosed").
+        First(&shift, shiftID).Error; err != nil {
+        helpers.ErrorResponse(c, 404, "Shift not found", err)
+        return
+    }
+
+    var summary struct {
+        TotalInvoice int64 `json:"total_invoice"`
+        TotalSubtotal float64 `json:"total_subtotal"`
+        TotalTax float64 `json:"total_tax"`
         TotalAmount float64 `json:"total_amount"`
+    }
+
+    summarySQL := `
+        SELECT 
+            COUNT(*) as total_invoice,
+            COALESCE(SUM(t.subtotal), 0) as total_subtotal,
+            COALESCE(SUM(t.subtotal * t.tax / 100), 0) as total_tax,
+            COALESCE(SUM(t.total_amount), 0) as total_amount
+        FROM transactions t
+        WHERE t.shift_id = ? AND t.status = 'done'
+    `
+
+    if err := config.DB.Raw(summarySQL, shiftID).Scan(&summary).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed summary", err)
+        return
+    }
+
+    type txItemRow struct {
+        ID uint64 `json:"id"`
         Status string `json:"status"`
-        TransactionDate string `json:"transaction_date"`
+        TransactionID uint64 `json:"transaction_id"`
+        Invoice string `json:"invoice"`
+        ProductName string `json:"product_name"`
+        Quantity int `json:"quantity"`
+        Price float64 `json:"price"`
+        DiscountPrice float64 `json:"discount_price"`
+        Subtotal float64 `json:"subtotal"`
         CreatedAt time.Time `json:"created_at"`
     }
 
-    var rows []txRow
+    var rows []txItemRow
 
     baseWhere := "WHERE t.shift_id = ?"
     args := []interface{}{shiftID}
-    if q != "" { 
-        like := "%"+q+"%"; 
-        baseWhere += " AND (t.invoice LIKE ? OR t.transaction_date LIKE ?)"; 
-        args = append(args, like, like) 
-    }
+    // if q != "" {
+    //     like := "%"+q+"%"
+    //     baseWhere += " AND (t.invoice LIKE ? OR ti.product_name LIKE ?)"
+    //     args = append(args, like, like)
+    // }
 
-    var total int64
-    countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM transactions t %s`, baseWhere)
-    if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil { 
-        helpers.ErrorResponse(c, 500, "Failed to count tx", err); 
-        return 
-    }
+    // var total int64
+    // countSQL := fmt.Sprintf(`
+    //     SELECT COUNT(*) 
+    //     FROM transaction_items ti
+    //     JOIN transactions t ON t.id = ti.transaction_id
+    //     %s
+    // `, baseWhere)
+    // if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
+    //     helpers.ErrorResponse(c, 500, "Failed to count transaction items", err);
+    //     return
+    // }
 
     dataSQL := fmt.Sprintf(`
         SELECT 
-            t.id, t.invoice, 
-            t.total_item, 
-            t.total_quantity, 
-            t.total_amount, 
-            t.status, 
-            t.transaction_date, 
-            t.created_at 
-        FROM transactions t 
-        %s 
-        ORDER BY t.created_at DESC LIMIT ? OFFSET ?`, baseWhere)
-    args = append(args, limit, offset)
+            ti.id,
+            t.status,
+            ti.transaction_id,
+            t.invoice,
+            ti.product_name,
+            ti.quantity,
+            ti.price,
+            ti.discount_price,
+            ti.subtotal,
+            ti.created_at
+        FROM transaction_items ti
+        JOIN transactions t ON t.id = ti.transaction_id
+        %s
+        ORDER BY ti.created_at DESC
+    `, baseWhere)
+    // args = append(args, limit, offset)
     if err := config.DB.Raw(dataSQL, args...).Scan(&rows).Error; err != nil { 
         helpers.ErrorResponse(c, 500, "Failed to fetch tx", err); 
         return 
     }
 
-    lastPage := int(math.Ceil(float64(total)/float64(limit)))
-    pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(total))
+    // lastPage := int(math.Ceil(float64(total)/float64(limit)))
+    // pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(total))
 
-    c.JSON(http.StatusOK, response.Success("User Transactions", gin.H{"data": rows, "pagination": pagination}))
+    c.JSON(http.StatusOK, response.Success("Detail Transaction Shift", gin.H{
+        "summary": gin.H{
+            "start": shift.StartTime,
+            "end": shift.EndTime,
+            "user_open": shift.UserOpen.Name,
+            "user_closed": shift.UserClosed.Name,
+            "initial_cash": shift.InitialCash,
+            "expected_cash": shift.ExpectedCash,
+            "actual_cash": shift.ActualCash,
+            "difference": shift.Difference,
+            "note": shift.Note,
+            "total_invoice": summary.TotalInvoice,
+            "total_subtotal": summary.TotalSubtotal,
+            "total_tax": summary.TotalTax,
+            "total_penjualan": summary.TotalAmount,
+        },
+        "items": rows,
+    }))
 }
 func CancelTransaction(c *gin.Context) {
     txIDParam := c.Param("id")

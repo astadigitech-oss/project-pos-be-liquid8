@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"fmt"
 	"liquid8/pos/config"
 	"liquid8/pos/models"
 
@@ -87,7 +86,6 @@ func RoleCheck(allowedRoles []string) gin.HandlerFunc {
 
         isAllowed := false
         for _, role := range allowedRoles {
-			fmt.Printf("Checking if user role '%s' is allowed '%s'\n", user.Role, role)
             if user.Role == role {
                 isAllowed = true
                 break
