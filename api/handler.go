@@ -89,9 +89,9 @@ func RouteHandler(r *gin.Engine) {
 
 	/*======================= ADMIN ONLY =======================*/
 		roleGroup(protected, []string{"superadmin","admin"}, func(rg *gin.RouterGroup) {
-			//========================================
+			// DASHBOARD
+			rg.GET("dashboard", controllers.GetDashboardData) //DashboardController.go
 			// PRODUCT
-			//========================================
 			rg.GET("products", controllers.ListAllProducts) //ProductController.go
 			
 			//========================================
