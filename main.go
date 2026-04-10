@@ -49,5 +49,5 @@ func main() {
 
 	api.RouteHandler(server)
 
-	server.Run(":5001")
+	server.Run(":5002")
 }
