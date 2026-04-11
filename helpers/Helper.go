@@ -251,7 +251,7 @@ func BuildPaginationLinks(
 		"current_page":   currentPage,
 		"from":           from,
 		"last_page":      lastPage,
-		"links":          links,
+		// "links":          links,
 		"per_page":       limit,
 		"to":             to,
 		"total":          totalData,
