@@ -366,7 +366,7 @@ func CheckoutTransaction(c *gin.Context) {
 	storeID = *user.StoreID
 
     type payload struct {
-		MemberID	*uint64	`json:"member_id"`
+		MemberID	uint64	`json:"member_id" binding:"required"`
         PaymentMethod string `json:"payment_method" binding:"required,oneof=cash transfer qris"`
         PaidAmount float64 `json:"paid_amount" binding:"required,gte=0"`
         Tax float64 `json:"tax" binding:"gte=0,max=100"`
@@ -389,6 +389,10 @@ func CheckoutTransaction(c *gin.Context) {
 					errorsMap["payment_method"] = "Payment method wajib diisi"
 				}else {
 					errorsMap["payment_method"] = "Payment method harus cash, transfer atau qris"
+				}
+			case "MemberID":
+				if e.Tag() == "required" {
+					errorsMap["member_id"] = "Member ID wajib diisi"
 				}
 			case "PaidAmount":
 				if e.Tag() == "required" {
@@ -414,7 +418,18 @@ func CheckoutTransaction(c *gin.Context) {
 		return
 	}
 
-    // load cart items for keep_code
+    // load member
+    var member models.Member
+    if err := config.DB.First(&member, p.MemberID).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            helpers.ErrorResponse(c, 404, "Member not found", nil)
+        }else {
+            helpers.ErrorResponse(c, 500, "Failed to load member", err)
+        }
+        return
+    }
+
+    // load cart items
     var items []models.CartItem
     if err := config.DB.Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, storeID).Find(&items).Error; err != nil {
         helpers.ErrorResponse(c, 500, "Failed to load cart items", err)
@@ -441,6 +456,7 @@ func CheckoutTransaction(c *gin.Context) {
         UserID: uint64(user.ID),
         ShiftID: shift.ID,
         Invoice: invoice,
+        MemberID: &p.MemberID,
         TotalItem: len(items),
         Tax: p.Tax,
         PaidAmount: p.PaidAmount,
