@@ -75,6 +75,7 @@ func RouteHandler(r *gin.Engine) {
 		// PPN
 		//========================================
 		protected.GET("ppns", controllers.GetPPN) //PPNController.go
+		protected.GET("ppns/:id", controllers.DetailPPN) //PPNController.go
 		protected.POST("ppns", controllers.StorePPN) //PPNController.go
 		protected.PUT("ppns/:id", controllers.UpdatePPN) //PPNController.go
 		protected.DELETE("ppns/:id", controllers.DeletePPN) //PPNController.go

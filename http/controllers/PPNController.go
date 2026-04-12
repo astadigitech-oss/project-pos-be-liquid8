@@ -31,6 +31,25 @@ func GetPPN(c *gin.Context)  {
 		"data": ppn,
 	})
 }
+func DetailPPN(c *gin.Context) {
+	ppnID := c.Param("ppn_id")
+
+	var ppn models.Ppn
+	if err := config.DB.First(&ppn, ppnID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Data ppn tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Gagal mengambil data ppn", "error": err.Error()})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Detail PPN",
+		"data":    ppn,
+	})
+}
 func StorePPN(c *gin.Context) {
 	type payloadRequest struct {
 		PPN float64 `json:"ppn" binding:"required,numeric"`
