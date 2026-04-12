@@ -34,6 +34,7 @@ func AddToCart(c *gin.Context) {
 	}()
 
     type payload struct {
+        MemberID      uint64 `json:"member_id" binding:"required"`
         ProductBarcode string  `json:"product_barcode" binding:"required"`
     }
 
@@ -48,6 +49,10 @@ func AddToCart(c *gin.Context) {
 		errorsMap := make(map[string]string)
 		for _, e := range ve {
 			switch e.Field() {
+			case "MemberID":
+				if e.Tag() == "required" {
+					errorsMap["member_id"] = "Member ID wajib diisi"
+				}
 			case "ProductBarcode":
 				if e.Tag() == "required" {
 					errorsMap["product_barcode"] = "Product barcode wajib diisi"
@@ -69,6 +74,13 @@ func AddToCart(c *gin.Context) {
 		return
 	}
 
+    //cari member
+    var member models.Member
+    if err := config.DB.First(&member, p.MemberID).Error; err != nil {
+        helpers.ErrorResponse(c, 404, "Member tidak ditemukan", err)
+        return
+    }
+
     // load product
     var product models.Product
     if err := config.DB.Where("barcode = ? AND store_id = ?", p.ProductBarcode, storeID).First(&product).Error; err != nil {
@@ -85,6 +97,7 @@ func AddToCart(c *gin.Context) {
     cart := models.CartItem{
         StoreID: storeID,
         UserID:  uint64(user.ID),
+        MemberID: member.ID,
         ProductID: product.ID,
         ProductName: product.Name,
         Quantity: int64(product.Quantity),
@@ -188,6 +201,7 @@ func ListPending(c *gin.Context) {
 	storeID = *user.StoreID
 
     type pendingGroup struct {
+        CustomerName string  `json:"customer_name"`
         KeepCode     string  `json:"keep_code"`
         ItemCount    int64   `json:"item_count"`
         Total float64 `json:"total"`
@@ -198,15 +212,17 @@ func ListPending(c *gin.Context) {
     // build raw query to aggregate
     baseSQL := `
 		SELECT 
-			keep_code, 
+            m.name AS customer_name,
+			ci.keep_code, 
 			COUNT(*) AS item_count, 
-			COALESCE(SUM(subtotal),0) AS total
-        FROM cart_items
-        WHERE user_id = ? 
-			AND store_id = ? 
-			AND keep_code IS NOT NULL 
-			AND keep_code != ''
-		GROUP BY keep_code ORDER BY MAX(created_at) DESC
+			COALESCE(SUM(ci.subtotal),0) AS total
+        FROM cart_items ci
+        JOIN members m ON ci.member_id = m.id
+        WHERE ci.user_id = ? 
+			AND ci.store_id = ? 
+			AND ci.keep_code IS NOT NULL 
+			AND ci.keep_code != ''
+		GROUP BY ci.keep_code ORDER BY ci.created_at DESC
 	`
 
 	if err := config.DB.Raw(baseSQL, user.ID, storeID).Scan(&groups).Error; err != nil {

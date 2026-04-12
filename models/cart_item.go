@@ -5,6 +5,7 @@ import "time"
 type CartItem struct {
 	ID        uint64 `json:"id" gorm:"primaryKey"`
 	StoreID   uint64 `json:"store_id" gorm:"index;not null"`
+	MemberID  uint `json:"member_id" gorm:"index;not null"`
 	UserID    uint64 `json:"user_id" gorm:"index; not null"`
 	ProductID uint64 `json:"product_id" gorm:"index;not null"`
 
@@ -22,4 +23,5 @@ type CartItem struct {
 	Store   *StoreProfile `gorm:"foreignKey:StoreID;references:ID" json:"store,omitempty"`
 	User   *User `gorm:"foreignKey:UserID;references:ID" json:"user,omitempty"`
 	Product   *Product `gorm:"foreignKey:ProductID;references:ID" json:"product,omitempty"`
+	Member   *Member `gorm:"foreignKey:MemberID;references:ID" json:"member,omitempty"`
 }

@@ -52,7 +52,6 @@ func ListAllMembers(c *gin.Context) {
         ID uint `json:"id"`
         Code string `json:"code"`
         Name string `json:"name"`
-        Email string `json:"email"`
         Phone string `json:"phone"`
     }
     var rows []Row
@@ -61,8 +60,7 @@ func ListAllMembers(c *gin.Context) {
 		SELECT 
 			id, 
 			code, 
-			name, 
-			email, 
+			name,  
 			phone 
 		FROM members %s 
 		ORDER BY created_at DESC LIMIT ? OFFSET ?`, baseWhere)
@@ -92,9 +90,7 @@ func DetailMember(c *gin.Context) {
 func CreateMember(c *gin.Context) {
 	type payload struct {
         Name string  `json:"name" binding:"required"`
-		Email string `json:"email" binding:"required,email"`
 		Phone string `json:"phone" binding:"required"`
-		NoKtp string `json:"no_ktp" binding:"required"`
     }
 
     var p payload
@@ -111,19 +107,9 @@ func CreateMember(c *gin.Context) {
 				if e.Tag() == "required" {
 					errorsMap["name"] = "Nama wajib diisi"
 				}
-			case "Email":
-				if e.Tag() == "required" {
-					errorsMap["email"] = "Email wajib diisi"
-				} else if e.Tag() == "email" {
-					errorsMap["email"] = "Format email tidak valid"
-				}
 			case "Phone":
 				if e.Tag() == "required" {
 					errorsMap["phone"] = "Telepon wajib diisi"
-				}
-			case "NoKtp":
-				if e.Tag() == "required" {
-					errorsMap["no_ktp"] = "No KTP wajib diisi"
 				}
 			default:
 				errorsMap[e.Field()] = "Validasi gagal"
@@ -136,7 +122,7 @@ func CreateMember(c *gin.Context) {
 	
 	var otherM models.Member
 	if err := config.DB.Model(&models.Member{}).
-		Where("email = ? OR phone = ? OR no_ktp = ?", p.Email, p.Phone, p.NoKtp).
+		Where("phone = ?", p.Phone).
 		First(&otherM).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			helpers.ErrorResponse(c, 500, "Failed query", err)
@@ -144,16 +130,8 @@ func CreateMember(c *gin.Context) {
 		}
 	}
 	// cek field mana yang duplicate
-	if otherM.Email == p.Email {
-		helpers.ErrorResponse(c, 422, "Email already in use", nil)
-		return
-	}
 	if otherM.Phone == p.Phone {
 		helpers.ErrorResponse(c, 422, "Phone already in use", nil)
-		return
-	}
-	if otherM.NoKtp == p.NoKtp {
-		helpers.ErrorResponse(c, 422, "KTP already in use", nil)
 		return
 	}
 
@@ -161,9 +139,7 @@ func CreateMember(c *gin.Context) {
     member := models.Member{
 		Code:    code,
 		Name:  p.Name,
-		Email: p.Email,
 		Phone: p.Phone,
-		NoKtp: p.NoKtp,
 	}
 
     if err := config.DB.Create(&member).Error; err != nil { 
@@ -183,9 +159,7 @@ func UpdateMember(c *gin.Context) {
 
 	var p struct {
         Name string  `json:"name" binding:"required"`
-		Email string `json:"email" binding:"required,email"`
 		Phone string `json:"phone" binding:"required"`
-		NoKtp string `json:"no_ktp" binding:"required"`
     }
     if err := c.ShouldBindJSON(&p); err != nil {
 		ve, ok := err.(validator.ValidationErrors)
@@ -200,19 +174,9 @@ func UpdateMember(c *gin.Context) {
 				if e.Tag() == "required" {
 					errorsMap["name"] = "Nama wajib diisi"
 				}
-			case "Email":
-				if e.Tag() == "required" {
-					errorsMap["email"] = "Email wajib diisi"
-				} else if e.Tag() == "email" {
-					errorsMap["email"] = "Format email tidak valid"
-				}
 			case "Phone":
 				if e.Tag() == "required" {
 					errorsMap["phone"] = "Telepon wajib diisi"
-				}
-			case "NoKtp":
-				if e.Tag() == "required" {
-					errorsMap["no_ktp"] = "No KTP wajib diisi"
 				}
 			default:
 				errorsMap[e.Field()] = "Validasi gagal"
@@ -231,7 +195,7 @@ func UpdateMember(c *gin.Context) {
 	var otherM models.Member
 	if err := config.DB.Model(&models.Member{}).
 		Where("id != ?", id).
-		Where("email = ? OR phone = ? OR no_ktp = ?", p.Email, p.Phone, p.NoKtp).
+		Where("phone = ?", p.Phone).
 		First(&otherM).Error; err != nil {
 		
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -240,24 +204,14 @@ func UpdateMember(c *gin.Context) {
 		}
 	}
 	// cek field mana yang duplicate
-	if otherM.Email == p.Email {
-		helpers.ErrorResponse(c, 422, "Email already in use", nil)
-		return
-	}
 	if otherM.Phone == p.Phone {
 		helpers.ErrorResponse(c, 422, "Phone already in use", nil)
-		return
-	}
-	if otherM.NoKtp == p.NoKtp {
-		helpers.ErrorResponse(c, 422, "KTP already in use", nil)
 		return
 	}
 
 	if err := config.DB.Model(&m).Updates(models.Member{
 		Name:  p.Name,
-		Email: p.Email,
 		Phone: p.Phone,
-		NoKtp: p.NoKtp,
 	}).Error; err != nil {
 		helpers.ErrorResponse(c, 500, "Failed to update member", err); 
 		return

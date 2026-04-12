@@ -97,10 +97,10 @@ func ListProductsOfStore(c *gin.Context) {
 
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
     if page < 1 {
         page = 1
     }
-    limit := 30
     offset := (page - 1) * limit
 
     type productRow struct {
