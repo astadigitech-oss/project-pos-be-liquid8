@@ -373,6 +373,51 @@ func RemoveCartByKeepCode(c *gin.Context) {
 
     c.JSON(http.StatusOK, response.Success("Cart items removed", nil))
 }
+func EmptyCurrentCart(c *gin.Context) {
+    user := c.MustGet("auth_user").(models.User)
+
+    // load cart items
+    var items []models.CartItem
+    if err := config.DB.Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, *user.StoreID).Find(&items).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to load cart items", err)
+        return
+    }
+
+    if len(items) == 0 {
+        helpers.ErrorResponse(c, 400, "Cart item kosong", nil)
+        return
+    }
+
+    tx := config.DB.WithContext(c.Request.Context()).Begin()
+    // delete cart items
+    if err := tx.Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, *user.StoreID).Delete(&models.CartItem{}).Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "Failed to delete cart items", err)
+        return
+    }
+
+    // collect product ids
+    prodIDs := make([]uint64, 0, len(items))
+    for _, it := range items {
+        prodIDs = append(prodIDs, it.ProductID)
+    }
+
+    // reset product status to 'display' for affected products
+    if len(prodIDs) > 0 {
+        if err := tx.Model(&models.Product{}).Where("id IN ?", prodIDs).Updates(map[string]interface{}{"status": "display"}).Error; err != nil {
+            tx.Rollback()
+            helpers.ErrorResponse(c, 500, "Failed to update product status", err)
+            return
+        }
+    }
+
+    if err := tx.Commit().Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Commit failed", err)
+        return
+    }
+
+    c.JSON(http.StatusOK, response.Success("Berhasil mengosongkan keranjang", nil))
+}
 
 //=========================== Transaksi ======================
 
