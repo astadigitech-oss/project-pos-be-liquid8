@@ -83,7 +83,7 @@ func EndShift(c *gin.Context) {
 	user := c.MustGet("auth_user").(models.User)
 
 	type payloadRequest struct {
-		ShiftID uint64 `json:"shift_id" binding:"required"`
+		// ShiftID uint64 `json:"shift_id" binding:"required"`
 		ActualCash float64 `json:"actual_cash" binding:"required,gte=0"`
 		Note *string `json:"note" binding:"omitempty"`
 	}
@@ -105,10 +105,6 @@ func EndShift(c *gin.Context) {
 				} else if e.Tag() == "gte" {
 					errorsMap["actual_cash"] = "actual cash harus bernilai 0 atau lebih"
 				}
-			case "ShiftID":
-				if e.Tag() == "required" {
-					errorsMap["shift_id"] = "Shift ID wajib diisi"
-				}
 			default:
 				errorsMap[e.Field()] = "Validasi gagal"
 			}
@@ -119,20 +115,17 @@ func EndShift(c *gin.Context) {
 	}
 
 	var shift models.Shift
-	storeID := uint64(0)
-	if user.StoreID != nil {
-		storeID = *user.StoreID
-	}
+	storeID := *user.StoreID
 
-	if err := config.DB.Where("id = ? AND store_id = ?", payload.ShiftID, storeID).First(&shift).Error; err != nil {
-		helpers.ErrorResponse(c, 404, "Shift tidak ditemukan", err)
+	if err := config.DB.Where("status = ? AND store_id = ?", "open", storeID).First(&shift).Error; err != nil {
+		helpers.ErrorResponse(c, 404, "Shift status open tidak ditemukan", err)
 		return
 	}
 
-	if shift.Status == "closed" {
-		helpers.ErrorResponse(c, 422, "Shift ini sudah closed", nil)
-		return
-	}
+	// if shift.Status == "closed" {
+	// 	helpers.ErrorResponse(c, 422, "Shift ini sudah closed", nil)
+	// 	return
+	// }
 
 	now := helpers.GetCurentTime()
 	expectedCash, err := helpers.RecalculateShiftExpectedCash(config.DB, storeID, shift.ID)
