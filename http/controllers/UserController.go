@@ -14,26 +14,28 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
 	// "gorm.io/gorm"
-	"golang.org/x/crypto/bcrypt"
 	"github.com/go-playground/validator/v10"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func GetUsers(c *gin.Context) {
 	q := strings.TrimSpace(c.Query("q"))
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
 	if page < 1 {
 		page = 1
 	}
-	limit := 50
 	offset := (page - 1) * limit
 
 	var users []models.User
 	var totalData int64
 
 	//inisialisasi query
-	query := config.DB.Model(&models.User{}).Preload("Role")
+	query := config.DB.Model(&models.User{}).Where("role NOT IN ?", []string{"superadmin", "admin"})
 
 	// Searching (misalnya, mencari berdasarkan nama atau email)
 	if q != "" {
@@ -42,7 +44,7 @@ func GetUsers(c *gin.Context) {
 	}
 
 	// Menghitung total data yang sesuai dengan filter/search sebelum diterapkan limit/offset
-	if err := query.Count(&totalData).Error; err != nil {
+	if err := query.Session(&gorm.Session{}).Count(&totalData).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menghitung total data pengguna", "error": err.Error()})
 		return
 	}
@@ -58,29 +60,6 @@ func GetUsers(c *gin.Context) {
 		return
 	}
 
-	type ScanAgg struct {
-		UserID    uint
-		TotalScanToday int64
-		TotalScan int64
-	}
-	
-	// BUILD RESPONSE DATA
-	// =========================
-	type UserResponse struct {
-		models.User
-		TotalScanToday int64 `json:"total_scan_today"`
-		TotalScan int64 `json:"total_scan"`
-	}
-
-	var result []UserResponse
-	for _, u := range users {
-		result = append(result, UserResponse{
-			User:          u,
-			TotalScanToday: 0,
-			TotalScan:      0,
-		})
-	}
-
 
 	lastPage := int(math.Ceil(float64(totalData) / float64(limit)))
 	// pagination links
@@ -91,9 +70,26 @@ func GetUsers(c *gin.Context) {
 			"status":  true,
 			"message": "List Users",
 			"resource": gin.H{
-				"data": result,
+				"data": users,
 				"pagination": pagination,
 			},
+		},
+	})
+}
+func DetailUser(c *gin.Context) {
+	userID := c.Param("id")
+
+	var user models.User
+	if err := config.DB.Preload("Role").First(&user, userID).Error; err != nil {
+		helpers.ErrorResponse(c, http.StatusNotFound, "User tidak ditemukan", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"status":  true,
+			"message": "Detail User",
+			"resource": user,
 		},
 	})
 }
@@ -103,7 +99,7 @@ func CreateUser(c *gin.Context) {
 		Username     string `json:"username" binding:"required"`
 		Email    string `json:"email" binding:"required,email"`
 		Password string `json:"password" binding:"required,min=6"`
-		Role     string `json:"role" binding:"required,oneof=admin user"`
+		Role     string `json:"role" binding:"required,oneof=admin kasir"`
 	}
 
 	var req CreateUserRequest
@@ -147,7 +143,7 @@ func CreateUser(c *gin.Context) {
 				if e.Tag() == "required" {
 					errors["role"] = "Role wajib dipilih"
 				}else {
-					errors["role"] = "Role harus salah satu dari admin, user"
+					errors["role"] = "Role harus salah satu dari admin, kasir"
 				}
 			}
 		}
@@ -215,7 +211,6 @@ func CreateUser(c *gin.Context) {
 		},
 	})
 }
-
 func UpdateUser(c *gin.Context) {
 	userID := c.Param("id")
 
@@ -224,7 +219,7 @@ func UpdateUser(c *gin.Context) {
 		Username string `json:"username" binding:"required"`
 		Email    string `json:"email" binding:"required,email"`
 		Password string `json:"password" binding:"omitempty,min=6"`
-		Role     string `json:"role" binding:"required,oneof=admin user"`
+		Role     string `json:"role" binding:"required,oneof=admin kasir"`
 	}
 
 	var req payload
@@ -268,7 +263,7 @@ func UpdateUser(c *gin.Context) {
 				if e.Tag() == "required" {
 					errors["role"] = "Role wajib dipilih"
 				}else {
-					errors["role"] = "Role harus salah satu dari admin, user"
+					errors["role"] = "Role harus salah satu dari admin, kasir"
 				}
 			}
 		}
@@ -360,7 +355,151 @@ func UpdateUser(c *gin.Context) {
 		"data":    user,
 	})
 }
+func UpdateProfile(c *gin.Context) {
+	user := c.MustGet("auth_user").(models.User)
 
+	var req struct {
+		Name     string `json:"name" binding:"required"`
+		Email    string `json:"email" binding:"required,email"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ve, ok := err.(validator.ValidationErrors)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  false,
+				"message": "Payload tidak valid",
+			})
+			return
+		}
+
+		errors := make(map[string]string)
+
+		for _, e := range ve {
+			field := strings.ToLower(e.Field())
+
+			switch field {
+			case "name":
+				errors["name"] = "Nama wajib diisi"
+			case "email":
+				if e.Tag() == "email" {
+					errors["email"] = "Format email tidak valid"
+				} else {
+					errors["email"] = "Email wajib diisi"
+				}
+			}
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  false,
+			"message": "Validasi gagal",
+			"errors":  errors,
+		})
+		return
+	}	
+
+	var count int64
+	if err := config.DB.
+		Model(&models.User{}).
+		Where("email = ? AND id != ?", req.Email, user.ID).
+		Count(&count).Error; err != nil {
+
+		helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal memeriksa email", err)
+		return
+	}
+
+	if count > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  false,
+			"message": "Email sudah digunakan",
+		})
+		return
+	}
+
+	user_update := map[string]interface{}{
+		"name":  req.Name,
+		"email": req.Email,
+	}
+
+	if err := config.DB.Model(&user).Updates(user_update).Error; err != nil {
+		helpers.ErrorResponse(c, http.StatusInternalServerError, "Failed to update user", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  true,
+		"message": "User profile berhasil diupdate",
+		"resource":    user,
+	})
+}
+func ChangePassword(c *gin.Context) {
+	user := c.MustGet("auth_user").(models.User)
+
+	var req struct {
+		OldPassword string `json:"old_password" binding:"required"`
+		NewPassword string `json:"new_password" binding:"required,min=6"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ve, ok := err.(validator.ValidationErrors)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  false,
+				"message": "Payload tidak valid",
+			})
+			return
+		}
+
+		errors := make(map[string]string)
+
+		for _, e := range ve {
+			field := strings.ToLower(e.Field())
+
+			switch field {
+			case "oldpassword":
+				errors["old_password"] = "Old Password wajib diisi"
+			case "newpassword":
+				if e.Tag() == "required" {
+					errors["new_password"] = "New Password wajib diisi"
+				} else {
+					errors["new_password"] = "New Password minimal 6 karakter"
+				}
+			default:
+				errors[field] = "Field tidak valid"
+			}
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  false,
+			"message": "Validasi gagal",
+			"errors":  errors,
+		})
+		return
+	}	
+
+	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.OldPassword)) != nil {
+		helpers.ErrorResponse(c, http.StatusUnauthorized, "Old password salah", nil)
+		return
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal generate password", err)
+		return
+	}
+
+	new_pass := string(hashedPassword)
+	if err := config.DB.Model(&user).Update("password", new_pass).Error; err != nil {
+		helpers.ErrorResponse(c, http.StatusInternalServerError, "Failed to update user password", err)
+		return
+	}
+
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  true,
+		"message": "User password berhasil diupdate",
+	})
+}
 func DeleteUser(c *gin.Context) {
 	userID := c.Param("id")
 
@@ -394,6 +533,34 @@ func DeleteUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  true,
 		"message": "User berhasil dihapus",
+	})
+}
+func UserInfo(c *gin.Context) {
+	user := c.MustGet("auth_user").(models.User)
+
+	user_info := gin.H{
+		"id":       user.ID,
+		"name":     user.Name,
+		"email":    user.Email,
+		"username": user.Username,
+		"role":     user.Role,
+		"store_name": nil,
+	}
+
+	if user.StoreID != nil {
+		var userstore models.StoreProfile
+		if err := config.DB.First(&userstore, "id = ?", *user.StoreID).Error; err != nil {
+			helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal mengambil data toko", err)
+			return
+		}
+
+		user_info["store_name"] = userstore.StoreName
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  true,
+		"message": "User info retrieved successfully",
+		"resource":   user_info,
 	})
 }
 

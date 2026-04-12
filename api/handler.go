@@ -69,20 +69,9 @@ func RouteHandler(r *gin.Engine) {
 			rg.POST("transactions/checkout", middleware.ShiftCheck(), controllers.CheckoutTransaction) //TransactionController.go
 			rg.DELETE("transactions/:id", controllers.CancelTransaction) //TransactionController.go
 
-			//========================================
-			// USER
-			//========================================
 		})
 	
 	/*======================= ALL ROLE =======================*/
-		//========================================
-		// PPN
-		//========================================
-		protected.GET("ppns", controllers.GetPPN) //PPNController.go
-		protected.GET("ppns/:id", controllers.DetailPPN) //PPNController.go
-		protected.POST("ppns", controllers.StorePPN) //PPNController.go
-		protected.PUT("ppns/:id", controllers.UpdatePPN) //PPNController.go
-		protected.DELETE("ppns/:id", controllers.DeletePPN) //PPNController.go
 		//========================================
 		// MEMBER
 		//========================================
@@ -91,18 +80,47 @@ func RouteHandler(r *gin.Engine) {
 		protected.POST("members", controllers.CreateMember) //MemberController.go
 		protected.PUT("members/:id", controllers.UpdateMember) //MemberController.go
 		protected.DELETE("members/:id", controllers.DeleteMember) //MemberController.go
+		//========================================
+		// USER
+		//========================================
+		protected.GET("users/info", controllers.UserInfo) //UserController.go
+		protected.PUT("users/profile", controllers.UpdateProfile) //UserController.go
+		protected.PUT("users/password", controllers.ChangePassword) //UserController.go
 
 	/*======================= ADMIN ONLY =======================*/
 		roleGroup(protected, []string{"superadmin","admin"}, func(rg *gin.RouterGroup) {
+			//========================================
+			// PPN
+			//========================================
+			rg.GET("ppns", controllers.GetPPN) //PPNController.go
+			rg.GET("ppns/:id", controllers.DetailPPN) //PPNController.go
+			rg.POST("ppns", controllers.StorePPN) //PPNController.go
+			rg.PUT("ppns/:id", controllers.UpdatePPN) //PPNController.go
+			rg.DELETE("ppns/:id", controllers.DeletePPN) //PPNController.go
+			
+			//========================================
 			// DASHBOARD
+			//========================================
 			rg.GET("dashboard", controllers.GetDashboardData) //DashboardController.go
+			
+			//========================================
 			// PRODUCT
+			//========================================
 			rg.GET("products", controllers.ListAllProducts) //ProductController.go
 			
 			//========================================
 			// TRANSACTION
 			//========================================
 			// rg.GET("transactions/all", controllers.AllTransactions) //TransactionController.go
+
+			//========================================
+			// USER
+			//========================================
+			rg.GET("users", controllers.GetUsers) //UserController.go
+			rg.GET("users/:id", controllers.DetailUser) //UserController.go
+			rg.POST("users", controllers.CreateUser) //UserController.go
+			rg.PUT("users/:id", controllers.UpdateUser) //UserController.go
+			rg.DELETE("users/:id", controllers.DeleteUser) //UserController.go
 		})
 	}
 }
