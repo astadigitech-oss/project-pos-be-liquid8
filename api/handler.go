@@ -85,9 +85,9 @@ func RouteHandler(r *gin.Engine) {
 		//========================================
 		// USER
 		//========================================
-		protected.GET("users/info", controllers.UserInfo) //UserController.go
-		protected.PUT("users/profile", controllers.UpdateProfile) //UserController.go
-		protected.PUT("users/password", controllers.ChangePassword) //UserController.go
+		protected.GET("users-info", controllers.UserInfo) //UserController.go
+		protected.PUT("users-profile", controllers.UpdateProfile) //UserController.go
+		protected.PUT("users-password", controllers.ChangePassword) //UserController.go
 
 	/*======================= ADMIN ONLY =======================*/
 		roleGroup(protected, []string{"superadmin","admin"}, func(rg *gin.RouterGroup) {

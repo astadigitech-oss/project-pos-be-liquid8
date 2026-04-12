@@ -95,6 +95,7 @@ func DetailUser(c *gin.Context) {
 }
 func CreateUser(c *gin.Context) {
 	type CreateUserRequest struct {
+		StoreID  uint   `json:"store_id" binding:"required"`
 		Name     string `json:"name" binding:"required"`
 		Username     string `json:"username" binding:"required"`
 		Email    string `json:"email" binding:"required,email"`
@@ -118,6 +119,10 @@ func CreateUser(c *gin.Context) {
 			field := strings.ToLower(e.Field())
 
 			switch field {
+			case "storeid":
+				if e.Tag() == "required" {
+					errors["store_id"] = "Store ID wajib diisi"
+				}
 			case "name":
 				if e.Tag() == "required" {
 					errors["name"] = "Nama wajib diisi"
@@ -157,6 +162,12 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 
+	var store models.StoreProfile
+	if err := config.DB.First(&store, req.StoreID).Error; err != nil {
+		helpers.ErrorResponse(c, 404, "Store ID tidak ditemukan", err)
+		return
+	}	
+
 	// CEK EMAIL SUDAH ADA
 	// =========================
 	var count int64
@@ -188,7 +199,9 @@ func CreateUser(c *gin.Context) {
 
 	// CREATE USER
 	// =========================
+	storeID := uint64(store.ID)
 	user := models.User{
+		StoreID:  &storeID,
 		Name:     req.Name,
 		Username:     req.Username,
 		Email:    req.Email,
@@ -215,6 +228,7 @@ func UpdateUser(c *gin.Context) {
 	userID := c.Param("id")
 
 	type payload struct {
+		StoreID  uint   `json:"store_id" binding:"required"`
 		Name     string `json:"name" binding:"required"`
 		Username string `json:"username" binding:"required"`
 		Email    string `json:"email" binding:"required,email"`
@@ -243,22 +257,28 @@ func UpdateUser(c *gin.Context) {
 			field := strings.ToLower(e.Field())
 
 			switch field {
+			case "storeid":
+				if e.Tag() == "required" {
+					errors["store_id"] = "Store ID wajib diisi"
+				}
 			case "name":
-				errors["name"] = "Nama wajib diisi"
-
+				if e.Tag() == "required" {
+					errors["name"] = "Nama wajib diisi"
+				}
 			case "username":
-				errors["username"] = "Username wajib diisi"
-
+				if e.Tag() == "required" {
+					errors["username"] = "Username wajib diisi"
+				}
 			case "email":
 				if e.Tag() == "email" {
 					errors["email"] = "Format email tidak valid"
 				} else {
 					errors["email"] = "Email wajib diisi"
 				}
-
 			case "password":
-				errors["password"] = "Password minimal 6 karakter"
-
+				if e.Tag() == "min" {
+					errors["password"] = "Password minimal 6 karakter"
+				}
 			case "role":
 				if e.Tag() == "required" {
 					errors["role"] = "Role wajib dipilih"
@@ -276,11 +296,17 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 
+	var store models.StoreProfile
+	if err := config.DB.First(&store, req.StoreID).Error; err != nil {
+		helpers.ErrorResponse(c, 404, "Store ID tidak ditemukan", err)
+		return
+	}	
+
 	// =========================
 	// AMBIL USER EXISTING
 	// =========================
 	var user models.User
-	if err := config.DB.First(&user, userID).Error; err != nil {
+	if err := config.DB.Where("role = ?", "kasir").First(&user, userID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  false,
 			"message": "User tidak ditemukan",
@@ -300,7 +326,6 @@ func UpdateUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
 	if count > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  false,
@@ -336,13 +361,6 @@ func UpdateUser(c *gin.Context) {
 			"message": "Gagal mengupdate user",
 			"error":   err.Error(),
 		})
-		return
-	}
-
-	// LOAD RELATION
-	// =========================
-	if err := config.DB.Preload("Role").First(&user, user.ID).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
