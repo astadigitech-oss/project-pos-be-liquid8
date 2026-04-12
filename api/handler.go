@@ -41,6 +41,7 @@ func RouteHandler(r *gin.Engine) {
 			// SHIFT
 			//========================================
 			rg.GET("shifts", controllers.GetShiftsByCashier) //ShiftController.go
+			rg.GET("shifts-active", controllers.CurrentShift) //ShiftController.go
 			rg.GET("shifts/:shift_id/transaction", controllers.DetailTransactionsShift) //TransactionController.go
 			rg.GET("shifts/all", controllers.GetAllShifts) //ShiftController.go
 			rg.POST("shifts/start", controllers.StartShift) //ShiftController.go
@@ -62,6 +63,7 @@ func RouteHandler(r *gin.Engine) {
 			rg.POST("carts/pending", middleware.ShiftCheck(), controllers.PendingCart) //TransactionController.go
 			rg.DELETE("carts/:cart_id", middleware.ShiftCheck(), controllers.RemoveItemCart) //TransactionController.go
 			rg.DELETE("carts/pending/:keep_code", middleware.ShiftCheck(), controllers.RemoveCartByKeepCode) //TransactionController.go
+			rg.DELETE("carts/current", controllers.EmptyCurrentCart) //TransactionController.go
 
 			// Transaction
 			rg.GET("transactions", controllers.GetTransactionHistories) //TransactionController.go

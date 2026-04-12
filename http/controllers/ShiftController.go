@@ -79,6 +79,19 @@ func StartShift(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response.Success("Shift created", shift))
 }
+func CurrentShift(c *gin.Context) {
+	user := c.MustGet("auth_user").(models.User)
+
+	var shift models.Shift
+	storeID := *user.StoreID
+
+	if err := config.DB.Where("status = ? AND store_id = ?", "open", storeID).First(&shift).Error; err != nil {
+		helpers.ErrorResponse(c, 404, "Shift status open tidak ditemukan", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response.Success("Current shift", shift))
+}
 func EndShift(c *gin.Context) {
 	user := c.MustGet("auth_user").(models.User)
 
@@ -161,10 +174,10 @@ func GetShiftsByCashier(c *gin.Context) {
 	user := c.MustGet("auth_user").(models.User)
 	q := c.DefaultQuery("q", "")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
 	if page < 1 {
 		page = 1
 	}
-	limit := 10
 	offset := (page - 1) * limit
 	// response row structure
 	type shiftRow struct {
@@ -194,8 +207,8 @@ func GetShiftsByCashier(c *gin.Context) {
 
 	if q != "" {
 		like := "%" + q + "%"
-		whereClauses += " AND (u_open.name LIKE ? OR u_closed.name LIKE ? OR s.store_name LIKE ?)"
-		args = append(args, like, like, like)
+		whereClauses += " AND (u_open.name LIKE ? OR u_closed.name LIKE ?)"
+		args = append(args, like, like)
 	}
 
 	// count
@@ -254,10 +267,10 @@ func GetShiftsByCashier(c *gin.Context) {
 func GetAllShifts(c *gin.Context) {
 	q := c.DefaultQuery("q", "")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
 	if page < 1 {
 		page = 1
 	}
-	limit := 10
 	offset := (page - 1) * limit
 	// response row structure
 	type shiftRow struct {
