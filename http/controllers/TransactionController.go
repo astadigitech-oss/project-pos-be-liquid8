@@ -275,6 +275,16 @@ func GetCurrentCart(c *gin.Context) {
         return
     }
 
+    var ppn models.Ppn
+    if err := config.DB.Where("is_tax_default = ?", true).First(&ppn).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            helpers.ErrorResponse(c, 404, "PPN tidak ditemukan", nil)
+        } else {
+            helpers.ErrorResponse(c, 500, "Internal server error", err)
+        }
+        return     
+    }
+
     var totalSubtotal float64
     var totalQuantity int64
     for _, it := range items {
@@ -282,9 +292,15 @@ func GetCurrentCart(c *gin.Context) {
         totalQuantity += it.Quantity
     }
 
+    ppn_price := totalSubtotal * (ppn.Ppn / 100)
     payload := gin.H{
         "items": items,
-        "total_amount": totalSubtotal,
+        "subtotal": totalSubtotal,
+        "ppn": gin.H{
+            "tax": ppn.Ppn,
+            "amount": ppn_price,
+        },
+        "total_amount": totalSubtotal + ppn_price,
     }
 
     c.JSON(http.StatusOK, response.Success("Current cart", payload))

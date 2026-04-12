@@ -33,12 +33,17 @@ var seederRegistry = map[string]SeederConfig{
 		Table: "users",
 		Run:   func() error { return seedUsers(config.DB) },
 	},
+	"ppn": {
+		Table: "ppns",
+		Run:   func() error { return seedPPN(config.DB) },
+	},
 }
 
 var seederOrder = []string{
 	"store",
 	"product",
 	"user",
+	"ppn",
 }
 
 func main() {
@@ -259,6 +264,14 @@ func seedProduct(db *gorm.DB) error {
 		Columns:   []clause.Column{{Name: "barcode"}},
 		DoNothing: true,
 	}).Create(&products).Error
+}
+func seedPPN(db *gorm.DB) error {
+	ppns := models.Ppn{
+		Ppn:         11,
+		IsTaxDefault: true,
+	}
+
+	return db.Create(&ppns).Error
 }
 func truncateTableByClass(className string) error {
 
