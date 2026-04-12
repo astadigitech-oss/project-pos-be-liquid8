@@ -120,9 +120,19 @@ func CheckToken(c *gin.Context) {
 		return
 	}
 
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "token tidak valid"})
+		c.Abort()
+		return
+	}
+
 	go func() {
 		config.DB.Model(&userToken).Update("last_used_at", time.Now())
 	}()
 
-	c.JSON(http.StatusOK, response.Success("Token Valid", gin.H{}))
+	c.JSON(http.StatusOK, response.Success("Token Valid", gin.H{
+		"role":     claims["role"],
+		"username": claims["username"],
+	}))
 }

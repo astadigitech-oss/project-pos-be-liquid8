@@ -68,6 +68,10 @@ func RouteHandler(r *gin.Engine) {
 			rg.GET("transactions/:id", controllers.DetailTransaction) //TransactionController.go
 			rg.POST("transactions/checkout", middleware.ShiftCheck(), controllers.CheckoutTransaction) //TransactionController.go
 			rg.DELETE("transactions/:id", controllers.CancelTransaction) //TransactionController.go
+
+			//========================================
+			// USER
+			//========================================
 		})
 	
 	/*======================= ALL ROLE =======================*/
