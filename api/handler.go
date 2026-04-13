@@ -19,9 +19,12 @@ func RouteHandler(r *gin.Engine) {
 	api := r.Group("/api") 
 
 	// Route public
-	// Authentication handler
-	api.POST("/login", controllers.Login)
-	api.GET("/checkLogin", controllers.CheckToken)
+	//========================================
+	// AUTH
+	//========================================
+	api.GET("/checkLogin", controllers.CheckToken) //AuthController.go
+	api.POST("/login", controllers.Login) //AuthController.go
+	api.POST("/logout", controllers.Logout) //AuthController.go
 
 	// // with rolecheck example
 	// adminOnly := protected.Group("").Use(middleware.RoleCheck([]string{"Admin"}))
@@ -34,6 +37,7 @@ func RouteHandler(r *gin.Engine) {
 	protected := api.Group("")
 	protected.Use(middleware.AuthCheck())
 	{
+
 		/*======================= KASIR ONLY =======================*/
 		roleGroup(protected, []string{"kasir"}, func(rg *gin.RouterGroup) {
 	

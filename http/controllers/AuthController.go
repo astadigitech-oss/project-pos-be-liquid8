@@ -25,10 +25,7 @@ func Login(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&user_input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "data tidak valid",
-			"msg":   err.Error(),
-		})
+		helpers.ErrorResponse(c, 400, "Format JSON tidak valid", err)
 		return
 	}
 
@@ -38,7 +35,7 @@ func Login(c *gin.Context) {
 		First(&user).Error; err != nil {
 		
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusUnauthorized, response.Error("email/password does not match"))
+			helpers.ErrorResponse(c, 401, "email/password does not match", nil)
 		}else{
 			helpers.ErrorResponse(c, 500, "Internal server error", err)
 		}
@@ -47,7 +44,7 @@ func Login(c *gin.Context) {
 
 	// cek password hash
 	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(user_input.Password)) != nil {
-		c.JSON(http.StatusUnauthorized, response.Error("email/password does not match"))
+		helpers.ErrorResponse(c, 401, "email/password does not match", nil)
 		return
 	}
 
@@ -57,13 +54,13 @@ func Login(c *gin.Context) {
 		"user_id":  user.ID,
 		"role":  user.Role,
 		"username": user.Username,
-		// "exp":      time.Now().AddDate(0, 1, 0).Unix(), // kadaluarsa 1 bulan
-		"exp":      time.Now().Add(time.Hour * 12).Unix(), // kadaluarsa 12 jam
+		"exp":      time.Now().AddDate(0, 1, 0).Unix(), // kadaluarsa 1 bulan
+		// "exp":      time.Now().Add(time.Hour * 12).Unix(), // kadaluarsa 12 jam
 	})
 
 	tokenString, err := token.SignedString(jwtSecret)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, response.Error("Could not create token"))
+		helpers.ErrorResponse(c, 500, "Could not create token", err)
 		return
 	}
 
@@ -79,18 +76,17 @@ func Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response.Success("Login sukses!", gin.H{"token": tokenString, "user": user}))
 }
-
 func CheckToken(c *gin.Context) {
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "token tidak ditemukan"})
+		helpers.ErrorResponse(c, 401, "token tidak ditemukan", nil)
 		c.Abort()
 		return
 	}
 
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 	if tokenString == authHeader {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "format token salah"})
+		helpers.ErrorResponse(c, 401, "format token salah", nil)
 		c.Abort()
 		return
 	}
@@ -106,7 +102,7 @@ func CheckToken(c *gin.Context) {
 
 	if err != nil || !token.Valid {
 		config.DB.Where("token = ?", tokenString).Delete(&models.UserToken{})
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "token tidak valid atau kadaluarsa"})
+		helpers.ErrorResponse(c, http.StatusUnauthorized, "token tidak valid atau kadaluarsa", err)
 		c.Abort()
 		return
 	}
@@ -115,14 +111,14 @@ func CheckToken(c *gin.Context) {
 	var userToken models.UserToken
 	err = config.DB.Where("token = ?", tokenString).First(&userToken).Error
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "token tidak ditemukan di database"})
+		helpers.ErrorResponse(c, http.StatusUnauthorized, "token tidak ditemukan di database", err)
 		c.Abort()
 		return
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "token tidak valid"})
+		helpers.ErrorResponse(c, http.StatusUnauthorized, "token tidak valid", nil)
 		c.Abort()
 		return
 	}
@@ -135,4 +131,28 @@ func CheckToken(c *gin.Context) {
 		"role":     claims["role"],
 		"username": claims["username"],
 	}))
+}
+func Logout(c *gin.Context) {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		helpers.ErrorResponse(c, http.StatusUnauthorized, "token tidak ditemukan", nil)
+		c.Abort()
+		return
+	}
+
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	if tokenString == authHeader {
+		helpers.ErrorResponse(c, http.StatusUnauthorized, "format token salah", nil)
+		c.Abort()
+		return
+	}
+
+	// hapus token jika masih valid
+	err := config.DB.Where("token = ?", tokenString).Delete(&models.UserToken{}).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		helpers.ErrorResponse(c, http.StatusUnauthorized, "Gagal menghapus token", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response.Success("Berhasil logout. Token telah dihapus", nil))
 }
