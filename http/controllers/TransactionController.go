@@ -443,10 +443,10 @@ func CheckoutTransaction(c *gin.Context) {
 	storeID = *user.StoreID
 
     type payload struct {
-		MemberID	uint64	`json:"member_id" binding:"required"`
+		// MemberID	uint64	`json:"member_id" binding:"required"`
+        // Tax float64 `json:"tax" binding:"gte=0,max=100"`
         PaymentMethod string `json:"payment_method" binding:"required,oneof=cash transfer qris"`
         PaidAmount float64 `json:"paid_amount" binding:"required,gte=0"`
-        Tax float64 `json:"tax" binding:"gte=0,max=100"`
         GrandTotal float64 `json:"grand_total" binding:"gte=0"`
     }
 
@@ -467,20 +467,9 @@ func CheckoutTransaction(c *gin.Context) {
 				}else {
 					errorsMap["payment_method"] = "Payment method harus cash, transfer atau qris"
 				}
-			case "MemberID":
-				if e.Tag() == "required" {
-					errorsMap["member_id"] = "Member ID wajib diisi"
-				}
 			case "PaidAmount":
 				if e.Tag() == "required" {
 					errorsMap["paid_amount"] = "Paid amount wajib diisi"
-				}
-			case "Tax":
-				if e.Tag() == "gte" {
-					errorsMap["tax"] = "tax minimal 0"
-				}
-				if e.Tag() == "max" {
-					errorsMap["tax"] = "tax maximal 100"
 				}
 			case "GrandTotal":
 				if e.Tag() == "gte" {
@@ -495,13 +484,13 @@ func CheckoutTransaction(c *gin.Context) {
 		return
 	}
 
-    // load member
-    var member models.Member
-    if err := config.DB.First(&member, p.MemberID).Error; err != nil {
+    // load ppn
+    var ppn models.Ppn
+    if err := config.DB.Where("is_tax_default = ?", true).First(&ppn).Error; err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
-            helpers.ErrorResponse(c, 404, "Member not found", nil)
+            helpers.ErrorResponse(c, 404, "default ppn belum di set", nil)
         }else {
-            helpers.ErrorResponse(c, 500, "Failed to load member", err)
+            helpers.ErrorResponse(c, 500, "Failed to load PPN", err)
         }
         return
     }
@@ -527,19 +516,21 @@ func CheckoutTransaction(c *gin.Context) {
 		return
 	}
 
-    now := helpers.GetCurentTime()
+    now := helpers.GetCurentTime(user.Store.Timezone)
+    memberID := uint64(items[0].MemberID)
     tr := models.Transaction{
         StoreID: storeID,
         UserID: uint64(user.ID),
         ShiftID: shift.ID,
         Invoice: invoice,
-        MemberID: &p.MemberID,
+        MemberID: memberID,
         TotalItem: len(items),
-        Tax: p.Tax,
+        Tax: ppn.Ppn,
         PaidAmount: p.PaidAmount,
         PaymentMethod: p.PaymentMethod,
         Status: "done",
-        TransactionDate: now.Format("2006-01-02"),
+        CreatedAt: now.UTC(),
+        UpdatedAt: now.UTC(),
     }
 
     if err := tx.Create(&tr).Error; err != nil {
@@ -573,8 +564,7 @@ func CheckoutTransaction(c *gin.Context) {
 		subTotal += it.Subtotal
     }
 
-    
-	totalAmount := subTotal + (subTotal * (float64(p.Tax) / float64(100)))
+	totalAmount := subTotal + (subTotal * (float64(ppn.Ppn) / float64(100)))
 	if totalAmount != p.GrandTotal {
 		tx.Rollback()
         c.JSON(422, gin.H{
@@ -621,6 +611,7 @@ func CheckoutTransaction(c *gin.Context) {
     c.JSON(http.StatusOK, response.Success("Transaction saved", tr))
 }
 func GetTransactionHistories(c *gin.Context) {
+    user := c.MustGet("auth_user").(models.User)
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
     limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
@@ -645,7 +636,7 @@ func GetTransactionHistories(c *gin.Context) {
 
     var rows []txRow
 
-    now := helpers.GetCurentTime()
+    now := helpers.GetCurentTime(user.Store.Timezone)
     // awal hari ini (00:00:00)
     startDate := time.Date(
         now.Year(), now.Month(), now.Day(),
@@ -654,6 +645,10 @@ func GetTransactionHistories(c *gin.Context) {
     )
     // akhir hari ini (23:59:59)
     endDate := startDate.Add(24*time.Hour - time.Nanosecond)
+    fmt.Println("Jakarta:", startDate, endDate)
+    startDate = startDate.UTC()
+    endDate = endDate.UTC()
+    fmt.Println("UTC:", startDate, endDate)
 
     fmt.Print(startDate, endDate)
     baseWhere := "WHERE t.created_at >= ? AND t.created_at <= ?"
@@ -697,6 +692,10 @@ func GetTransactionHistories(c *gin.Context) {
     lastPage := int(math.Ceil(float64(total)/float64(limit)))
     pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(total))
 
+    for i := range rows {
+        rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, user.Store.Timezone)
+    }
+
     c.JSON(http.StatusOK, gin.H{
         "success": true,
         "message": "List riwayat transaksi",
@@ -707,6 +706,7 @@ func GetTransactionHistories(c *gin.Context) {
     })
 }
 func DetailTransaction(c *gin.Context) {
+    user := c.MustGet("auth_user").(models.User)
     idParam := c.Param("id")
     id, err := strconv.ParseUint(idParam, 10, 64)
     if err != nil {
@@ -722,6 +722,8 @@ func DetailTransaction(c *gin.Context) {
         return
     }
 
+    tx.ToLocal(user.Store.Timezone)
+
     c.JSON(http.StatusOK, gin.H{
         "success": true,
         "message": "Detail transaksi",
@@ -729,6 +731,7 @@ func DetailTransaction(c *gin.Context) {
     })
 }
 func DetailTransactionsShift(c *gin.Context) {
+    user := c.MustGet("auth_user").(models.User)
     shiftIDParam := c.Param("shift_id")
     shiftID, err := strconv.ParseUint(shiftIDParam, 10, 64)
     if err != nil {
@@ -751,6 +754,8 @@ func DetailTransactionsShift(c *gin.Context) {
         helpers.ErrorResponse(c, 404, "Shift not found", err)
         return
     }
+
+    shift.ToLocal(user.Store.Timezone)
 
     var summary struct {
         TotalInvoice int64 `json:"total_invoice"`
@@ -830,6 +835,10 @@ func DetailTransactionsShift(c *gin.Context) {
     if err := config.DB.Raw(dataSQL, args...).Scan(&rows).Error; err != nil { 
         helpers.ErrorResponse(c, 500, "Failed to fetch tx", err); 
         return 
+    }
+
+    for i := range rows {
+        rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, user.Store.Timezone)
     }
 
     // lastPage := int(math.Ceil(float64(total)/float64(limit)))

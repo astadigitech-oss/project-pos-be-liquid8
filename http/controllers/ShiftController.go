@@ -63,13 +63,15 @@ func StartShift(c *gin.Context) {
 	}
 
 	// prepare shift
-	now := helpers.GetCurentTime()
+	now := helpers.GetCurentTime(user.Store.Timezone) // Asia/Jakarta
 	shift := models.Shift{
 		StoreID:     storeID,
 		OpenBy:      uint64(user.ID),
-		StartTime:   now,
+		StartTime:   now.UTC(),
 		Status:      "open",
 		InitialCash: payload.InitialCash,
+		CreatedAt:   now.UTC(),
+		UpdatedAt:   now.UTC(),
 	}
 
 	if err := config.DB.Create(&shift).Error; err != nil {
@@ -90,6 +92,7 @@ func CurrentShift(c *gin.Context) {
 		return
 	}
 
+	shift.ToLocal(user.Store.Timezone)
 	c.JSON(http.StatusOK, response.Success("Current shift", shift))
 }
 func EndShift(c *gin.Context) {
@@ -140,7 +143,7 @@ func EndShift(c *gin.Context) {
 	// 	return
 	// }
 
-	now := helpers.GetCurentTime()
+	now := helpers.GetCurentTime(user.Store.Timezone) // Asia/Jakarta
 	expectedCash, err := helpers.RecalculateShiftExpectedCash(config.DB, storeID, shift.ID)
 	if err != nil {
 		helpers.ErrorResponse(c, 422, "Recalculate expected cash gagal", err)
@@ -151,7 +154,7 @@ func EndShift(c *gin.Context) {
 	diff := payload.ActualCash - expectedCash
 
 	updates := map[string]interface{}{
-		"end_time":   now,
+		"end_time":   now.UTC(),
 		"status":     "closed",
 		"actual_cash": payload.ActualCash,
 		"expected_cash": expectedCash,
@@ -255,6 +258,15 @@ func GetShiftsByCashier(c *gin.Context) {
 	lastPage := int(math.Ceil(float64(totalData) / float64(limit)))
 	pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(totalData))
 
+	for i := range rows {
+		rows[i].StartTime = helpers.ToLocalTime(rows[i].StartTime, user.Store.Timezone)
+		rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, user.Store.Timezone)
+		if rows[i].EndTime != nil {
+			endTime := helpers.ToLocalTime(*rows[i].EndTime, user.Store.Timezone)
+			rows[i].EndTime = &endTime
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status": true,
 		"message": "List data shifts",
@@ -265,6 +277,7 @@ func GetShiftsByCashier(c *gin.Context) {
 	})
 }
 func GetAllShifts(c *gin.Context) {
+	user := c.MustGet("auth_user").(models.User)
 	q := c.DefaultQuery("q", "")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
@@ -350,6 +363,19 @@ func GetAllShifts(c *gin.Context) {
 
 	lastPage := int(math.Ceil(float64(totalData) / float64(limit)))
 	pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(totalData))
+
+	timezone := "Asia/Jakarta"
+	if user.StoreID != nil {
+		timezone = user.Store.Timezone
+	}
+	for i := range rows {
+		rows[i].StartTime = helpers.ToLocalTime(rows[i].StartTime, timezone)
+		rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, timezone)
+		if rows[i].EndTime != nil {
+			endTime := helpers.ToLocalTime(*rows[i].EndTime, timezone)
+			rows[i].EndTime = &endTime
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status": true,

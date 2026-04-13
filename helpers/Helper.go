@@ -142,11 +142,15 @@ func GetToday() string {
 
 	return startOfDayInJakarta.Format("2006-01-02")
 }
-func GetCurentTime() time.Time {
-	location,_ := time.LoadLocation("Asia/Jakarta")
-	nowInJakarta := time.Now().In(location)
+func GetCurentTime(tz string) time.Time {
+	location, _ := time.LoadLocation(tz)
+	nowInLocation := time.Now().In(location)
 
-	return nowInJakarta
+	return nowInLocation
+}
+func ToLocalTime(t time.Time, tz string) time.Time {
+	location, _ := time.LoadLocation(tz)
+	return t.In(location)
 }
 func BuildPaginationLinks(
 	c *gin.Context,

@@ -43,3 +43,9 @@ func (p *Product) GetDaysSinceCreated() string {
 
 	return fmt.Sprintf("%d Hari", days)
 }
+
+func (s *Product) ToLocal(tz string) {
+	loc, _ := time.LoadLocation(tz)
+	s.CreatedAt = s.CreatedAt.In(loc)
+	s.UpdatedAt = s.UpdatedAt.In(loc)
+}

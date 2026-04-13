@@ -7,7 +7,7 @@ type Transaction struct {
 	StoreID uint64 `json:"store_id" gorm:"index;not null"`
 	UserID  uint64 `json:"user_id" gorm:"index;not null"`
 	ShiftID uint64 `json:"shift_id" gorm:"index;not null"`
-	MemberID *uint64  `json:"member_id" gorm:"index"`
+	MemberID uint64  `json:"member_id" gorm:"index"`
 
 	Invoice string `json:"invoice" gorm:"unique;size:25;not null"`
 	TotalItem     int `json:"total_item" gorm:"default:0;"`
@@ -21,7 +21,6 @@ type Transaction struct {
 	ChangeAmount float64 `json:"change_amount" gorm:"type:decimal(18,2);default:0"`
 	PaymentMethod string `json:"payment_method" gorm:"type:enum('cash','transfer','qris')"`
 	Status        string `json:"status" gorm:"type:enum('pending','cancelled','done');default:'pending'"`
-	TransactionDate string `json:"transaction_date" gorm:"type:date;not null"`
 
 	//relation
 	Store   *StoreProfile `gorm:"foreignKey:StoreID;references:ID" json:"store,omitempty"`
@@ -31,4 +30,10 @@ type Transaction struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (s *Transaction) ToLocal(tz string) {
+	loc, _ := time.LoadLocation(tz)
+	s.CreatedAt = s.CreatedAt.In(loc)
+	s.UpdatedAt = s.UpdatedAt.In(loc)
 }

@@ -21,3 +21,9 @@ type TransactionItem struct {
 	CreatedAt 		time.Time `json:"created_at"`
 	UpdatedAt 		time.Time `json:"updated_at"`
 }
+
+func (s *TransactionItem) ToLocal(tz string) {
+	loc, _ := time.LoadLocation(tz)
+	s.CreatedAt = s.CreatedAt.In(loc)
+	s.UpdatedAt = s.UpdatedAt.In(loc)
+}

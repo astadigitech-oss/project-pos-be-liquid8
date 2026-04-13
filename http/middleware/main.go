@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"liquid8/pos/config"
+	"liquid8/pos/helpers"
 	"liquid8/pos/models"
 
 	"net/http"
@@ -56,7 +57,7 @@ func AuthCheck() gin.HandlerFunc {
 		var userToken models.UserToken
 		err = config.DB.Where("token = ?", tokenString).First(&userToken).Error
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "token tidak ditemukan di database"})
+			helpers.ErrorResponse(c, http.StatusUnauthorized, "token tidak ditemukan di database", err)
 			c.Abort()
 			return
 		}
@@ -66,7 +67,7 @@ func AuthCheck() gin.HandlerFunc {
 		}()
 
 		var user models.User
-		if err := config.DB.First(&user, claims["user_id"]).Error; err != nil {
+		if err := config.DB.Preload("Store").First(&user, claims["user_id"]).Error; err != nil {
 			c.AbortWithStatusJSON(403, gin.H{
 				"success": false,
 				"message": "user not found",

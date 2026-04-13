@@ -32,7 +32,7 @@ func InitDB() {
 	name := os.Getenv("DB_NAME")
 
 	//koneksi database mysql => {user}:{pass}@tcp({host}:{port})/{database}
-	query := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&loc=Local", user, pass, host, port, name)
+	query := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&loc=UTC", user, pass, host, port, name)
 
 	db, err := gorm.Open(mysql.Open(query), &gorm.Config{})
 	if err != nil {

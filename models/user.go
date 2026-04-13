@@ -18,3 +18,9 @@ type User struct {
 	Store *StoreProfile `gorm:"foreignKey:StoreID;references:ID;constraint:OnDelete:CASCADE" json:"store_,omitempty"`
 }
 
+func (s *User) ToLocal(tz string) {
+	loc, _ := time.LoadLocation(tz)
+	s.CreatedAt = s.CreatedAt.In(loc)
+	s.UpdatedAt = s.UpdatedAt.In(loc)
+}
+

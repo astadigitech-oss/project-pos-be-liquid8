@@ -26,3 +26,13 @@ type Shift struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+func (s *Shift) ToLocal(tz string) {
+	loc, _ := time.LoadLocation(tz)
+	s.CreatedAt = s.CreatedAt.In(loc)
+	s.UpdatedAt = s.UpdatedAt.In(loc)
+	s.StartTime = s.StartTime.In(loc)
+	if s.EndTime != nil {
+		*s.EndTime = s.EndTime.In(loc)
+	}
+}
