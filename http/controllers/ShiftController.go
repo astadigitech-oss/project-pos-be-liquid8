@@ -182,6 +182,18 @@ func GetShiftsByCashier(c *gin.Context) {
 		page = 1
 	}
 	offset := (page - 1) * limit
+
+	startDateQuery := c.Query("start_date")
+	endDateQuery := c.Query("end_date")
+
+	getStartOfDay := func(t time.Time) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	}
+
+	getEndOfDay := func(t time.Time) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, int(time.Second-time.Nanosecond), t.Location())
+	}
+
 	// response row structure
 	type shiftRow struct {
 		ID           uint64    `json:"id"`
@@ -207,6 +219,47 @@ func GetShiftsByCashier(c *gin.Context) {
 		whereClauses += " AND shifts.store_id = ?"
 		args = append(args, *user.StoreID)
 	}
+
+	var startUTC, endUTC *time.Time
+	if startDateQuery != "" {
+		start, err := helpers.ParseFlexibleDate(startDateQuery, user.Store.Timezone)
+		if err != nil {
+			helpers.ErrorResponse(c, 400, "Invalid start_date", err)
+			return
+		}
+		s := getStartOfDay(start).UTC()
+		startUTC = &s
+	}
+	if endDateQuery != "" {
+		end, err := helpers.ParseFlexibleDate(endDateQuery, user.Store.Timezone)
+		if err != nil {
+			helpers.ErrorResponse(c, 400, "Invalid end_date", err)
+			return
+		}
+		e := getEndOfDay(end).UTC()
+		endUTC = &e
+	}
+	// default: hari ini
+	if startUTC == nil && endUTC == nil {
+		now := helpers.GetCurentTime(user.Store.Timezone)
+		s := getStartOfDay(now).UTC()
+		e := getEndOfDay(now).UTC()
+
+		startUTC = &s
+		endUTC = &e
+	}
+	// ==================
+	// APPLY TO QUERY
+	// ==================
+	if startUTC != nil {
+		whereClauses += " AND shifts.created_at >= ?"
+		args = append(args, *startUTC)
+	}
+	if endUTC != nil {
+		whereClauses += " AND shifts.created_at <= ?"
+		args = append(args, *endUTC)
+	}
+
 
 	if q != "" {
 		like := "%" + q + "%"

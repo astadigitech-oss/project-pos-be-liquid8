@@ -348,8 +348,8 @@ func FlexibleNormalize(input string) string {
 	// kalau bukan pure angka/currency → biarkan
 	return s
 }
-func ParseFlexibleDate(input string) (time.Time, error) {
-	loc, err := time.LoadLocation("Asia/Jakarta")
+func ParseFlexibleDate(input string, tz string) (time.Time, error) {
+	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		return time.Time{}, err
 	}
