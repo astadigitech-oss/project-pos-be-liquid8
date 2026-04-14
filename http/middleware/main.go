@@ -79,7 +79,6 @@ func AuthCheck() gin.HandlerFunc {
 		c.Next()
 	}
 }
-
 func RoleCheck(allowedRoles []string) gin.HandlerFunc {
     return func(c *gin.Context) {
         // 1. Ambil role user dari Context
@@ -104,7 +103,6 @@ func RoleCheck(allowedRoles []string) gin.HandlerFunc {
         c.Next()
     }
 }
-
 func ShiftCheck() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// auth_user must be set by AuthCheck
@@ -128,6 +126,65 @@ func ShiftCheck() gin.HandlerFunc {
 
 		// set shift_active in context
 		c.Set("shift_active", shift)
+		c.Next()
+	}
+}
+func OAuthCheck() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+
+		if authHeader == "" {
+			helpers.ErrorResponse(c, http.StatusUnauthorized, "Missing Authorization header", nil)
+			c.Abort()
+			return
+		}
+
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			helpers.ErrorResponse(c, http.StatusUnauthorized, "Invalid Authorization format", nil)
+			return
+		}
+
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			// pastikan method signing benar
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return []byte(os.Getenv("JWT_SECRET")), nil
+		})
+
+		if err != nil || !token.Valid {
+			helpers.ErrorResponse(c, http.StatusUnauthorized, "Invalid token", err)
+			c.Abort()
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			helpers.ErrorResponse(c, http.StatusUnauthorized, "Invalid claims", nil)
+			c.Abort()
+			return
+		}
+
+		// ambil client_id dari sub
+		clientID, ok := claims["sub"].(string)
+		if !ok {
+			helpers.ErrorResponse(c, http.StatusUnauthorized, "Invalid token client id", nil)
+			c.Abort()
+			return
+		}
+
+		// cek secret_key
+		if claims["secret_key"] != os.Getenv("CLIENT_SECRET") {
+			helpers.ErrorResponse(c, http.StatusUnauthorized, "Invalid token secret key", nil)
+			c.Abort()
+			return
+		}
+
+		// simpan ke context
+		c.Set("client_id", clientID)
+
 		c.Next()
 	}
 }

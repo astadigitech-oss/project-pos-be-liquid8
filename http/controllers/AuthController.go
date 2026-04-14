@@ -76,6 +76,47 @@ func Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response.Success("Login sukses!", gin.H{"token": tokenString, "user": user}))
 }
+func OAuthServiceAPI(c *gin.Context) {
+	var req struct {
+		ClientID     string `json:"client_id" binding:"required"`
+		ClientSecret string `json:"client_secret" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		helpers.ErrorResponse(c, 400, "Format JSON tidak valid", err)
+		return
+	}
+
+	// validasi dari ENV
+	if req.ClientID != os.Getenv("CLIENT_ID") ||
+		req.ClientSecret != os.Getenv("CLIENT_SECRET") {
+		helpers.ErrorResponse(c, http.StatusUnauthorized, "Invalid client credentials", nil)
+		return
+	}
+
+	var jwtSecret []byte = []byte(os.Getenv("JWT_SECRET"))
+	// Generate JWT token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  req.ClientID,
+		"type": "service",
+		"secret_key": os.Getenv("CLIENT_SECRET"),
+		"iat":  time.Now().Unix(),
+		"exp":      time.Now().AddDate(0, 1, 0).Unix(), // kadaluarsa 1 bulan
+		// "exp":      time.Now().Add(time.Hour * 2).Unix(), // kadaluarsa 2 jam
+		// "exp":      time.Now().Add(time.Minute * 15).Unix(), // kadaluarsa 15 menit
+	})
+
+	tokenString, err := token.SignedString(jwtSecret)
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Could not create token", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"access_token": tokenString,
+		"token_type":   "Bearer",
+	})
+}
 func CheckToken(c *gin.Context) {
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
