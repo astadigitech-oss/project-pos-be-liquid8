@@ -116,54 +116,119 @@ func GetTotalSalesByFilter(c *gin.Context) {
 	switch period {
 	case "week":
 		// Week: Monday..Sunday of current week
-		// time.Sunday    = 0
-		// time.Monday    = 1
-		// time.Tuesday   = 2
+		// time.Sunday = 0
+		// time.Monday = 1
+		// time.Tuesday = 2
 		// time.Wednesday = 3
-		// time.Thursday  = 4
-		// time.Friday    = 5
-		// time.Saturday  = 6
+		// time.Thursday = 4
+		// time.Friday = 5
+		// time.Saturday = 6
 		weekday := int(now.Weekday())
-		if weekday == 0 { // Sunday -> make it 7
+		if weekday == 0 {
 			weekday = 7
 		}
-		// compute monday
-		//now.Day() tgl 1-31
 		monday := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
 		start = monday
-		end = monday.AddDate(0, 0, 6).Add(-time.Nanosecond)
+		end = monday.AddDate(0, 0, 5)
+
 	case "month":
-		// month means full year range: Jan 1 .. Dec 31 of current year
 		start = time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, now.Location())
-		end = time.Date(now.Year()+1, time.January, 1, 0, 0, 0, 0, now.Location()).Add(-time.Nanosecond)
+		end = time.Date(now.Year(), time.December, 31, 23, 59, 59, 0, now.Location())
+
 	default:
-		// day (today)
 		start = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		end = start.AddDate(0, 0, 1).Add(-time.Nanosecond)
+		end = start.AddDate(0, 0, 1).Add(-time.Second)
 	}
 
-	type DailySales struct {
-		Date  string  `json:"date"`
-		Total float64 `json:"total"`
+	type Row struct {
+		Date  time.Time
+		Total float64
 	}
 
-	var results []DailySales
-
+	var rows []Row
 	if err := config.DB.Model(&models.Transaction{}).
-		Select("DATE(transaction_date) as date, COALESCE(SUM(total_amount),0) as total").
-		Where("status = ? AND transaction_date >= ? AND transaction_date <= ?", "done", start.Format("2006-01-02"), end.Format("2006-01-02")).
-		Group("DATE(transaction_date)").
-		Order("date ASC").
-		Scan(&results).Error; err != nil {
+		Select("DATE(created_at + INTERVAL 7 HOUR) as date, COALESCE(SUM(total_amount),0) as total").
+		Where("status = ? AND created_at >= ? AND created_at <= ?", "done", start.UTC(), end.UTC()).
+		Group("date").
+		Scan(&rows).Error; err != nil {
 
-		helpers.ErrorResponse(c, 500, "Failed to calculate daily sales", err)
+		helpers.ErrorResponse(c, 500, "Failed to calculate sales", err)
 		return
 	}
 
-	c.JSON(http.StatusOK, response.Success("total sales", gin.H{
-		"period": period,
-		"start": start.Format("2006-01-02"),
-		"end": end.Format("2006-01-02"),
-		"sales": results,
-	}))
+	// Mapping hasil query
+	resultMap := make(map[string]float64)
+	for _, r := range rows {
+		key := r.Date.Format("2006-01-02")
+		resultMap[key] = r.Total
+	}
+
+	// Final result
+	var results []gin.H
+	type resFormat struct {
+		Period    string  `json:"period"`
+		Start     string  `json:"start"`
+		End       string  `json:"end"`
+		Sales     []gin.H `json:"sales"`
+	}
+	payload := resFormat{
+		Period: period,
+	}
+	// WEEK / DAY (per hari)
+	if period == "week" || period == "day" {
+		payload.Start = start.Format("02 January 2006")
+		payload.End = end.Format("02 January 2006")
+
+		for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+
+			key := d.Format("2006-01-02")
+
+			results = append(results, gin.H{
+				"label":		getDayIndo(d),
+				"date":        d.Format("02 January 2006"),
+				"total_sales": resultMap[key], // default 0 kalau tidak ada
+			})
+		}
+	}
+
+	// MONTH (per bulan)
+	if period == "month" {
+		payload.Start = start.Format("January 2006")
+		payload.End = end.Format("January 2006")
+
+		monthMap := make(map[int]float64)
+
+		// grouping ulang per bulan
+		for _, r := range rows {
+			month := int(r.Date.Month())
+			monthMap[month] += r.Total
+		}
+
+		for m := 1; m <= 12; m++ {
+
+			d := time.Date(now.Year(), time.Month(m), 1, 0, 0, 0, 0, now.Location())
+
+			results = append(results, gin.H{
+				"date":        d.Format("January 2006"),
+				"label":		d.Format("January"),
+				"total_sales": monthMap[m],
+			})
+		}
+	}
+	payload.Sales = results
+
+	c.JSON(http.StatusOK, response.Success("total sales", payload))
+}
+
+func getDayIndo(t time.Time) string {
+	days := map[string]string{
+		"Sunday":    "Minggu",
+		"Monday":    "Senin",
+		"Tuesday":   "Selasa",
+		"Wednesday": "Rabu",
+		"Thursday":  "Kamis",
+		"Friday":    "Jumat",
+		"Saturday":  "Sabtu",
+	}
+	return days[t.Format("Monday")]
 }
