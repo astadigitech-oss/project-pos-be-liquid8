@@ -491,3 +491,5 @@ func GetActiveShift(db *gorm.DB, storeID uint) (*models.Shift, error) {
 
 	return &shift, nil
 }
+
+

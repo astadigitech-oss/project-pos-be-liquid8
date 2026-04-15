@@ -25,7 +25,7 @@ func RouteHandler(r *gin.Engine) {
 	api.GET("/checkLogin", controllers.CheckToken) //AuthController.go
 	api.POST("/login", controllers.Login) //AuthController.go
 	api.POST("/logout", controllers.Logout) //AuthController.go
-
+	api.POST("/oauth/token", controllers.OAuthServiceAPI) //AuthController.go
 	// // with rolecheck example
 	// adminOnly := protected.Group("").Use(middleware.RoleCheck([]string{"Admin"}))
 	// {
@@ -75,6 +75,11 @@ func RouteHandler(r *gin.Engine) {
 			rg.POST("transactions/checkout", middleware.ShiftCheck(), controllers.CheckoutTransaction) //TransactionController.go
 			rg.DELETE("transactions/:id", controllers.CancelTransaction) //TransactionController.go
 
+			//========================================
+			// MIGRATE PENDING
+			//========================================
+			rg.GET("migrate-pending", controllers.ListPendingMigrateHistories) //MigrateController.go
+
 		})
 	
 	/*======================= ALL ROLE =======================*/
@@ -92,6 +97,14 @@ func RouteHandler(r *gin.Engine) {
 		protected.GET("users-info", controllers.UserInfo) //UserController.go
 		protected.PUT("users-profile", controllers.UpdateProfile) //UserController.go
 		protected.PUT("users-password", controllers.ChangePassword) //UserController.go
+		//========================================
+		// STORE PROFILE
+		//========================================
+		protected.GET("stores", controllers.ListStores) //StoreController.go
+		protected.GET("stores/:id", controllers.DetailStore) //StoreController.go
+		protected.POST("stores", controllers.CreateStore) //StoreController.go
+		protected.PUT("stores/:id", controllers.UpdateStore) //StoreController.go
+		protected.DELETE("stores/:id", controllers.DeleteStore) //StoreController.go
 
 	/*======================= ADMIN ONLY =======================*/
 		roleGroup(protected, []string{"superadmin","admin"}, func(rg *gin.RouterGroup) {
@@ -127,6 +140,18 @@ func RouteHandler(r *gin.Engine) {
 			rg.POST("users", controllers.CreateUser) //UserController.go
 			rg.PUT("users/:id", controllers.UpdateUser) //UserController.go
 			rg.DELETE("users/:id", controllers.DeleteUser) //UserController.go
+
 		})
+	}
+
+	// wms service integration
+	wmsService := api.Group("")
+	wmsService.Use(middleware.OAuthCheck())
+	{
+		//========================================
+		// SYNC STORE
+		//========================================
+		wmsService.GET("destination-stores/sync", controllers.ListStores) //StoreController.go
+		wmsService.POST("products/store", controllers.ReceiveMigrateDocument) //ProductController.go
 	}
 }

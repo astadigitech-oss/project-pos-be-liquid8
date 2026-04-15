@@ -14,14 +14,12 @@ type Product struct {
 	OldBarcode		 	*string  	`gorm:"size:50" json:"old_barcode"`
 	OldPrice		  	float64		`gorm:"type:decimal(18,2);not null" json:"old_price"`
 	ActualPrice			float64		`gorm:"type:decimal(18,2);not null" json:"actual_price"`
-
 	Barcode       		string     	`gorm:"size:50;unique;not null" json:"barcode"`
 	Name          		string     	`gorm:"size:255;not null" json:"name"`
 	Price         		float64    	`gorm:"type:decimal(18,2); not null" json:"price"`
 	Quantity      		int64      	`gorm:"not null" json:"quantity"`
 	Status        		string     	`gorm:"type:enum('display','sale','bkl');size:15;not null" json:"status"` 
 	TagColor    		string     	`gorm:"index" json:"tag_color"`
-	Discount      		*float64    `gorm:"type:decimal(18,2);" json:"discount"`
 	IsSo          		*string     `gorm:"type:enum('check','done','lost','addition');size:8" json:"is_so"`
 	IsExtraProduct    	bool     	`gorm:"default:false" json:"is_extra_product"`
 	UserSo        		*uint64     `json:"user_so"`

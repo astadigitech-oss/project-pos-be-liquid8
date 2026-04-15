@@ -9,6 +9,7 @@ import (
 
 	"liquid8/pos/config"
 	"liquid8/pos/helpers"
+	"liquid8/pos/http/response"
 	"liquid8/pos/models"
 
 	"github.com/gin-gonic/gin"
@@ -171,4 +172,135 @@ func ListProductsOfStore(c *gin.Context) {
         },
     })
 }
+func ReceiveMigrateDocument(c *gin.Context) {
+    var payload struct {
+        DocumentCode string `json:"document_code" binding:"required"`
+        StoreToken   string `json:"store_token" binding:"required"`
+        Products     []struct {
+            CodeDocument  		*string     `json:"code_document"`
+            OldBarcode		 	*string  	`json:"old_barcode"`
+            OldPrice		  	float64		`json:"old_price" binding:"required"`
+            ActualPrice			float64		`json:"actual_price" binding:"required"`
+            Barcode       		string     	`json:"barcode" binding:"required"`
+            Name          		string     	`json:"name" binding:"required"`
+            Price         		float64    	`json:"price" binding:"required"`
+            Quantity      		int64      	`json:"quantity" binding:"required"`
+            Status        		string     	`json:"status" binding:"required"`
+            TagColor    		string     	`json:"tag_color" binding:"required"`
+            IsSo          		*string     `json:"is_so"`
+            IsExtraProduct    	*bool     	`json:"is_extra_product"`
+            UserSo        		*uint64     `json:"user_so"`
+        } `json:"products" binding:"required,dive,required"`
+    }
 
+    if err := c.ShouldBindJSON(&payload); err != nil {
+        errors := response.FormatValidationError(err)
+
+        c.JSON(400, gin.H{
+            "message": "Invalid payload",
+            "errors":  errors,
+        })
+        return
+    }
+
+    // check if store token is valid
+    var store models.StoreProfile
+    if err := config.DB.Where("token = ?", payload.StoreToken).First(&store).Error; err != nil {
+        helpers.ErrorResponse(c, 400, "invalid store token", err)
+        return
+    }
+
+    // idempotency: check if any product already inserted with this document code for the store
+    var exists int64
+    if err := config.DB.Model(&models.MigrateProductHistory{}).
+        Where("code = ? AND store_id = ?", payload.DocumentCode, store.ID).
+        Count(&exists).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "failed to check existing document", err)
+        return
+    }
+
+    if exists > 0 {
+        // already processed, return success (idempotent)
+        helpers.ErrorResponse(c, 400, fmt.Sprintf("Migrate document dengan code %s sebelumnya sudah berhasil dimasukan", payload.DocumentCode), nil)
+        return
+    }
+
+    // start transaction
+    tx := config.DB.WithContext(c.Request.Context()).Begin()
+    if tx.Error != nil {
+        helpers.ErrorResponse(c, 500, "failed to start transaction", tx.Error)
+        return
+    }
+
+    // insert migrate history
+    hist := models.MigrateProductHistory{
+        StoreID:        uint64(store.ID),
+        Code:           &payload.DocumentCode,
+        User:          "wms",
+        TotalProduct:  len(payload.Products),
+        TypeMigration: "IN",
+    }
+
+    if err := tx.Create(&hist).Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "failed to insert migrate history", err)
+        return
+    }
+
+    // insert products
+    totalQuantity := int64(0)
+    totalPrice := float64(0)
+    batchSize := 100
+    var batch []models.Product
+    for i, p := range payload.Products {
+        totalPrice += p.Price
+        totalQuantity += p.Quantity
+
+        isExtra := false
+        if p.IsExtraProduct != nil {isExtra = *p.IsExtraProduct}
+
+        batch = append(batch, models.Product{
+            StoreID:  uint64(store.ID),
+            MigrateID: &hist.ID,
+            CodeDocument: p.CodeDocument,
+            OldBarcode: p.OldBarcode,
+            OldPrice:   p.OldPrice,
+            ActualPrice: p.ActualPrice,
+            Barcode:   p.Barcode,
+            Name:      p.Name,
+            Price:     p.Price,
+            Quantity:  p.Quantity,
+            Status:    "display",
+            TagColor: p.TagColor,
+            IsSo: p.IsSo,
+            IsExtraProduct: isExtra,
+            UserSo: p.UserSo,
+        })
+
+        if len(batch) == batchSize || i == len(payload.Products)-1 {
+            if err := tx.CreateInBatches(batch, batchSize).Error; err != nil {
+                tx.Rollback()
+                helpers.ErrorResponse(c, 500, "failed to insert product", err)
+                return
+            }
+            batch = nil // reset
+        }
+    }
+
+    if err := tx.Model(&hist).Updates(map[string]interface{}{
+        "total_quantity": totalQuantity,
+        "total_price":    totalPrice,
+    }).Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "failed to update migrate history", err)
+        return
+    }
+
+    if err := tx.Commit().Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "commit failed", err)
+        return
+    }
+
+    c.JSON(http.StatusOK, response.Success("Migrate product berhasil dilakukan", nil))
+}
