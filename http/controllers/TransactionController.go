@@ -34,7 +34,6 @@ func AddToCart(c *gin.Context) {
 	}()
 
     type payload struct {
-        MemberID      uint64 `json:"member_id" binding:"required"`
         ProductBarcode string  `json:"product_barcode" binding:"required"`
     }
 
@@ -49,10 +48,6 @@ func AddToCart(c *gin.Context) {
 		errorsMap := make(map[string]string)
 		for _, e := range ve {
 			switch e.Field() {
-			case "MemberID":
-				if e.Tag() == "required" {
-					errorsMap["member_id"] = "Member ID wajib diisi"
-				}
 			case "ProductBarcode":
 				if e.Tag() == "required" {
 					errorsMap["product_barcode"] = "Product barcode wajib diisi"
@@ -74,13 +69,6 @@ func AddToCart(c *gin.Context) {
 		return
 	}
 
-    //cari member
-    var member models.Member
-    if err := config.DB.First(&member, p.MemberID).Error; err != nil {
-        helpers.ErrorResponse(c, 404, "Member tidak ditemukan", err)
-        return
-    }
-
     // load product
     var product models.Product
     if err := config.DB.Where("barcode = ? AND store_id = ?", p.ProductBarcode, storeID).First(&product).Error; err != nil {
@@ -97,7 +85,6 @@ func AddToCart(c *gin.Context) {
     cart := models.CartItem{
         StoreID: storeID,
         UserID:  uint64(user.ID),
-        MemberID: member.ID,
         ProductID: product.ID,
         ProductName: product.Name,
         Quantity: int64(product.Quantity),
@@ -166,6 +153,32 @@ func RemoveItemCart(c *gin.Context) {
 }
 func PendingCart(c *gin.Context) {
     user := c.MustGet("auth_user").(models.User)
+    var payload struct {
+		MemberID	uint64	`json:"member_id" binding:"required"`
+    }
+
+    if err := c.ShouldBindJSON(&payload); err != nil {
+		ve, ok := err.(validator.ValidationErrors)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Format JSON tidak valid"})
+			return
+		}
+		errorsMap := make(map[string]string)
+		for _, e := range ve {
+			switch e.Field() {
+			case "MemberID":
+				if e.Tag() == "required" {
+					errorsMap["member_id"] = "Member ID wajib diisi"
+				}
+			default:
+				errorsMap[e.Field()] = "Validasi gagal"
+			}
+		}
+
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "Validasi gagal", "errors": errorsMap})
+		return
+	}
+
     storeID := uint64(0)
     if user.StoreID != nil { 
 		storeID = *user.StoreID 
@@ -173,6 +186,17 @@ func PendingCart(c *gin.Context) {
 		helpers.ErrorResponse(c, 403, "User tidak memiliki store ID", nil)
 		return
 	}
+
+    //load data member
+    var member models.Member
+    if err := config.DB.Where("id = ?", payload.MemberID).First(&member).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            helpers.ErrorResponse(c, 404, "Member not found", nil)
+        } else {
+            helpers.ErrorResponse(c, 500, "Failed to load member", err)
+        }
+        return
+    }
 
     // generate a keep code (simple UUID short)
     keep, err := helpers.GeneratePendingKeepCode(config.DB, *user.StoreID); 
@@ -184,7 +208,10 @@ func PendingCart(c *gin.Context) {
     // update cart items without keep_code for this user/store
     if err := config.DB.Model(&models.CartItem{}).
         Where("user_id = ? AND store_id = ? AND (keep_code = '' OR keep_code IS NULL)", user.ID, storeID).
-        Updates(map[string]interface{}{"keep_code": keep}).Error; err != nil {
+        Updates(map[string]interface{}{
+            "keep_code": keep,
+            "member_id": payload.MemberID,
+        }).Error; err != nil {
         helpers.ErrorResponse(c, 500, "Failed to pend cart", err)
         return
     }
@@ -443,7 +470,7 @@ func CheckoutTransaction(c *gin.Context) {
 	storeID = *user.StoreID
 
     type payload struct {
-		// MemberID	uint64	`json:"member_id" binding:"required"`
+		MemberID	uint64	`json:"member_id" binding:"required"`
         // Tax float64 `json:"tax" binding:"gte=0,max=100"`
         PaymentMethod string `json:"payment_method" binding:"required,oneof=cash transfer qris"`
         PaidAmount float64 `json:"paid_amount" binding:"required,gte=0"`
@@ -461,6 +488,10 @@ func CheckoutTransaction(c *gin.Context) {
 		errorsMap := make(map[string]string)
 		for _, e := range ve {
 			switch e.Field() {
+			case "MemberID":
+				if e.Tag() == "required" {
+					errorsMap["member_id"] = "Member ID wajib diisi"
+				}
 			case "PaymentMethod":
 				if e.Tag() == "required" {
 					errorsMap["payment_method"] = "Payment method wajib diisi"
@@ -483,6 +514,17 @@ func CheckoutTransaction(c *gin.Context) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "Validasi gagal", "errors": errorsMap})
 		return
 	}
+
+    //load data member
+    var member models.Member
+    if err := config.DB.Where("id = ?", p.MemberID).First(&member).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            helpers.ErrorResponse(c, 404, "Member not found", nil)
+        } else {
+            helpers.ErrorResponse(c, 500, "Failed to load member", err)
+        }
+        return
+    }
 
     // load ppn
     var ppn models.Ppn
@@ -517,13 +559,12 @@ func CheckoutTransaction(c *gin.Context) {
 	}
 
     now := helpers.GetCurentTime(user.Store.Timezone)
-    memberID := uint64(items[0].MemberID)
     tr := models.Transaction{
         StoreID: storeID,
         UserID: uint64(user.ID),
         ShiftID: shift.ID,
         Invoice: invoice,
-        MemberID: memberID,
+        MemberID: uint64(member.ID),
         TotalItem: len(items),
         Tax: ppn.Ppn,
         PaidAmount: p.PaidAmount,
