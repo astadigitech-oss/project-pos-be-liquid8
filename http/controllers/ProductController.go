@@ -98,7 +98,7 @@ func ListProductsOfStore(c *gin.Context) {
 
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
+    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
     if page < 1 {
         page = 1
     }

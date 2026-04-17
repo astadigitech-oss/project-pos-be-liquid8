@@ -222,42 +222,53 @@ func ListPending(c *gin.Context) {
     user := c.MustGet("auth_user").(models.User)
     storeID := uint64(0)
     if user.StoreID == nil {
-		helpers.ErrorResponse(c, 403, "User does not have store ID", nil)
-		return
-	}
-	storeID = *user.StoreID
+        helpers.ErrorResponse(c, 403, "User does not have store ID", nil)
+        return
+    }
+    storeID = *user.StoreID
+
+    q := strings.TrimSpace(c.DefaultQuery("q", ""))
+    page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
+    if page < 1 { page = 1 }
+    offset := (page-1)*limit
 
     type pendingGroup struct {
         CustomerName string  `json:"customer_name"`
         KeepCode     string  `json:"keep_code"`
         ItemCount    int64   `json:"item_count"`
-        Total float64 `json:"total"`
+        Total        float64 `json:"total"`
     }
 
     var groups []pendingGroup
 
-    // build raw query to aggregate
-    baseSQL := `
-		SELECT 
-            m.name AS customer_name,
-			ci.keep_code, 
-			COUNT(*) AS item_count, 
-			COALESCE(SUM(ci.subtotal),0) AS total
-        FROM cart_items ci
-        JOIN members m ON ci.member_id = m.id
-        WHERE ci.user_id = ? 
-			AND ci.store_id = ? 
-			AND ci.keep_code IS NOT NULL 
-			AND ci.keep_code != ''
-		GROUP BY ci.keep_code ORDER BY ci.created_at DESC
-	`
+    // build where and args
+    baseWhere := "WHERE ci.user_id = ? AND ci.store_id = ? AND ci.keep_code IS NOT NULL AND ci.keep_code != ''"
+    args := []interface{}{user.ID, storeID}
+    if q != "" {
+        baseWhere += " AND m.name LIKE ?"
+        args = append(args, "%"+q+"%")
+    }
 
-	if err := config.DB.Raw(baseSQL, user.ID, storeID).Scan(&groups).Error; err != nil {
-		helpers.ErrorResponse(c, 500, "Failed to list pending groups", err)
-		return
-	}
+    // count distinct keep_code
+    var total int64
+    countSQL := "SELECT COUNT(DISTINCT ci.keep_code) FROM cart_items ci JOIN members m ON ci.member_id = m.id " + baseWhere
+    if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to count pending groups", err)
+        return
+    }
 
-    c.JSON(http.StatusOK, response.Success("List Pending transactions", groups))
+    dataSQL := "SELECT m.name AS customer_name, ci.keep_code, COUNT(*) AS item_count, COALESCE(SUM(ci.subtotal),0) AS total FROM cart_items ci JOIN members m ON ci.member_id = m.id " + baseWhere + " GROUP BY ci.keep_code ORDER BY ci.created_at DESC LIMIT ? OFFSET ?"
+    args = append(args, limit, offset)
+    if err := config.DB.Raw(dataSQL, args...).Scan(&groups).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to list pending groups", err)
+        return
+    }
+
+    lastPage := int(math.Ceil(float64(total)/float64(limit)))
+    pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(groups), int(total))
+
+    c.JSON(http.StatusOK, response.Success("List Pending transactions", gin.H{"data": groups, "pagination": pagination}))
 }
 func ResumePendingCheck(c *gin.Context) {
     user := c.MustGet("auth_user").(models.User)
