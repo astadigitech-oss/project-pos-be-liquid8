@@ -5,7 +5,7 @@ import "time"
 type CartItem struct {
 	ID        uint64 `json:"id" gorm:"primaryKey"`
 	StoreID   uint64 `json:"store_id" gorm:"index;not null"`
-	MemberID  *uint `json:"member_id" gorm:"index;not null"`
+	MemberID  *uint `json:"member_id" gorm:"index;"`
 	UserID    uint64 `json:"user_id" gorm:"index; not null"`
 	ProductID uint64 `json:"product_id" gorm:"index;not null"`
 
