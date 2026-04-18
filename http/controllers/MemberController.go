@@ -29,7 +29,7 @@ func ListAllMembers(c *gin.Context) {
     baseWhere := ""
     args := []interface{}{}
     if q != "" { 
-		baseWhere = "WHERE name LIKE ? OR email LIKE ?"; 
+		baseWhere = "WHERE name LIKE ? OR phone LIKE ?"; 
 		like := "%"+q+"%"; 
 		args = append(args, like, like) 
 	}
