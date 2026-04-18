@@ -17,38 +17,70 @@ import (
 
 // ListStores returns paginated store profiles
 func ListStores(c *gin.Context) {
-    q := strings.TrimSpace(c.DefaultQuery("q", ""))
-    page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-    if page < 1 { page = 1 }
-    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
-    offset := (page-1)*limit
+	q := strings.TrimSpace(c.DefaultQuery("q", ""))
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
+	offset := (page - 1) * limit
 
-    var stores []models.StoreProfile
-    db := config.DB.Model(&models.StoreProfile{})
-    if q != "" {
-        like := "%" + q + "%"
-        db = db.Where("store_name LIKE ? OR phone LIKE ? OR address LIKE ?", like, like, like)
-    }
+	type Result struct {
+		models.StoreProfile
+		TotalProducts int64   `json:"total_products"`
+		TotalSales    float64 `json:"total_sales"`
+	}
 
-    // count total matching
-    var total int64
-    if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "failed to count stores", err)
-        return
-    }
+	var results []Result
 
-    // fetch page
-    if err := db.Limit(limit).Offset(offset).Find(&stores).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "failed to fetch stores", err)
-        return
-    }
-    lastPage := int(math.Ceil(float64(total)/float64(limit)))
-    pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(stores), int(total))
+	db := config.DB.Model(&models.StoreProfile{}).
+		Select(`
+			store_profiles.*,
+			COALESCE(p.total_products, 0) as total_products,
+			COALESCE(t.total_sales, 0) as total_sales
+		`).
+		Joins(`
+			LEFT JOIN (
+				SELECT store_id, COUNT(*) as total_products
+				FROM products
+				WHERE status = 'display'
+				GROUP BY store_id
+			) p ON p.store_id = store_profiles.id
+		`).
+		Joins(`
+			LEFT JOIN (
+				SELECT store_id, SUM(total_amount) as total_sales
+				FROM transactions
+				WHERE status = 'done'
+				GROUP BY store_id
+			) t ON t.store_id = store_profiles.id
+		`)
 
-    c.JSON(http.StatusOK, response.Success("List stores", gin.H{
-        "data":      stores,
-        "pagination": pagination,
-    }))
+	if q != "" {
+		like := "%" + q + "%"
+		db = db.Where("store_name LIKE ? OR phone LIKE ? OR address LIKE ?", like, like, like)
+	}
+
+	// count total
+	var total int64
+	if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "failed to count stores", err)
+		return
+	}
+
+	// fetch data
+	if err := db.Limit(limit).Offset(offset).Find(&results).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "failed to fetch stores", err)
+		return
+	}
+
+	lastPage := int(math.Ceil(float64(total) / float64(limit)))
+	pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(results), int(total))
+
+	c.JSON(http.StatusOK, response.Success("List stores", gin.H{
+		"data": results,
+		"pagination": pagination,
+	}))
 }
 
 func DetailStore(c *gin.Context) {
@@ -110,4 +142,15 @@ func DeleteStore(c *gin.Context) {
         return
     }
     c.JSON(http.StatusOK, gin.H{"status": true, "message": "store deleted"})
+}
+
+func ListStoresForSync(c *gin.Context) {
+    var stores []models.StoreProfile
+
+    if err := config.DB.Model(&models.StoreProfile{}).Find(&stores).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "failed to fetch stores", err)
+        return
+    }
+
+    c.JSON(http.StatusOK, response.Success("List stores", stores))
 }

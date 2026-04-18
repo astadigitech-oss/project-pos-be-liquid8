@@ -120,7 +120,11 @@ func RouteHandler(r *gin.Engine) {
 			//========================================
 			// DASHBOARD
 			//========================================
-			rg.GET("dashboard", controllers.GetDashboardData) //DashboardController.go
+			//statistik dashboard
+			rg.GET("dashboard/index", controllers.GetDashboardData) //DashboardController.go
+			rg.GET("dashboard/sales-total", controllers.GetTotalSalesByFilter) //DashboardController.go
+			//Menu Toko
+			rg.GET("dashboard/list-stores", controllers.ListStores) //StoreController.go
 			
 			//========================================
 			// PRODUCT
@@ -151,7 +155,7 @@ func RouteHandler(r *gin.Engine) {
 		//========================================
 		// SYNC STORE
 		//========================================
-		wmsService.GET("destination-stores/sync", controllers.ListStores) //StoreController.go
+		wmsService.GET("destination-stores/sync", controllers.ListStoresForSync) //StoreController.go
 		wmsService.POST("products/store", controllers.ReceiveMigrateDocument) //ProductController.go
 	}
 }
