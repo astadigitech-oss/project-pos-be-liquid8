@@ -323,8 +323,44 @@ func GetCurrentCart(c *gin.Context) {
     storeID := uint64(0)
     if user.StoreID != nil { storeID = *user.StoreID } else { helpers.ErrorResponse(c, 422, "User tidak memiliki store ID", nil); return }
 
-    var items []models.CartItem
-    if err := config.DB.Where("user_id = ? AND store_id = ? AND (keep_code IS NULL OR keep_code = '')", user.ID, storeID).Find(&items).Error; err != nil {
+    type cartItemResponse struct {
+        ID            uint64  `json:"id"`
+        StoreID       uint64  `json:"store_id"`
+        MemberID      *uint64 `json:"member_id"`
+        UserID        uint64  `json:"user_id"`
+        ProductID     uint64  `json:"product_id"`
+        Barcode       string  `json:"barcode"`
+        KeepCode      *string `json:"keep_code"`
+        ProductName   string  `json:"product_name"`
+        Quantity      int64   `json:"quantity"`
+        Price         float64 `json:"price"`
+        DiscountPrice float64 `json:"discount_price"`
+        Subtotal      float64 `json:"subtotal"`
+    }
+
+    var items []cartItemResponse
+    err := config.DB.
+        Table("cart_items").
+        Select(`
+            cart_items.id,
+            cart_items.store_id,
+            cart_items.member_id,
+            cart_items.user_id,
+            cart_items.product_id,
+            products.barcode,
+            cart_items.keep_code,
+            products.name as product_name,
+            cart_items.quantity,
+            cart_items.price,
+            cart_items.discount_price,
+            cart_items.subtotal
+        `).
+        Joins("LEFT JOIN products ON products.id = cart_items.product_id").
+        Where("cart_items.user_id = ? AND cart_items.store_id = ? AND (cart_items.keep_code IS NULL OR cart_items.keep_code = '')",
+            user.ID, storeID).
+        Scan(&items).Error
+
+    if err != nil {
         helpers.ErrorResponse(c, 500, "Failed to load current cart", err)
         return
     }
