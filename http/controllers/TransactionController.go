@@ -77,7 +77,7 @@ func AddToCart(c *gin.Context) {
     }
 
 	if product.Status == "sale" {
-		helpers.ErrorResponse(c, 422, "Product sudah terjual", nil)
+		helpers.ErrorResponse(c, 422, "Barang sudah discan", nil)
 		return
 	}
 
