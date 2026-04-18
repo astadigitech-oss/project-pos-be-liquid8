@@ -54,8 +54,8 @@ func Login(c *gin.Context) {
 		"user_id":  user.ID,
 		"role":  user.Role,
 		"username": user.Username,
-		"exp":      time.Now().AddDate(0, 1, 0).Unix(), // kadaluarsa 1 bulan
-		// "exp":      time.Now().Add(time.Hour * 12).Unix(), // kadaluarsa 12 jam
+		// "exp":      time.Now().AddDate(0, 1, 0).Unix(), // kadaluarsa 1 bulan
+		"exp":      time.Now().Add(time.Hour * 12).Unix(), // kadaluarsa 12 jam
 	})
 
 	tokenString, err := token.SignedString(jwtSecret)
@@ -101,9 +101,9 @@ func OAuthServiceAPI(c *gin.Context) {
 		"type": "service",
 		"secret_key": os.Getenv("CLIENT_SECRET"),
 		"iat":  time.Now().Unix(),
-		"exp":      time.Now().AddDate(0, 1, 0).Unix(), // kadaluarsa 1 bulan
+		// "exp":      time.Now().AddDate(0, 1, 0).Unix(), // kadaluarsa 1 bulan
 		// "exp":      time.Now().Add(time.Hour * 2).Unix(), // kadaluarsa 2 jam
-		// "exp":      time.Now().Add(time.Minute * 15).Unix(), // kadaluarsa 15 menit
+		"exp":      time.Now().Add(time.Minute * 15).Unix(), // kadaluarsa 15 menit
 	})
 
 	tokenString, err := token.SignedString(jwtSecret)
