@@ -240,14 +240,14 @@ func GetShiftsByCashier(c *gin.Context) {
 		endUTC = &e
 	}
 	// default: hari ini
-	if startUTC == nil && endUTC == nil {
-		now := helpers.GetCurentTime(user.Store.Timezone)
-		s := getStartOfDay(now).UTC()
-		e := getEndOfDay(now).UTC()
+	// if startUTC == nil && endUTC == nil {
+	// 	now := helpers.GetCurentTime(user.Store.Timezone)
+	// 	s := getStartOfDay(now).UTC()
+	// 	e := getEndOfDay(now).UTC()
 
-		startUTC = &s
-		endUTC = &e
-	}
+	// 	startUTC = &s
+	// 	endUTC = &e
+	// }
 	// ==================
 	// APPLY TO QUERY
 	// ==================
