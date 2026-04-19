@@ -521,7 +521,6 @@ func CheckoutTransaction(c *gin.Context) {
         // Tax float64 `json:"tax" binding:"gte=0,max=100"`
         PaymentMethod string `json:"payment_method" binding:"required,oneof=cash transfer qris"`
         PaidAmount float64 `json:"paid_amount" binding:"required,gte=0"`
-        GrandTotal float64 `json:"grand_total" binding:"gte=0"`
     }
 
     var p payload
@@ -548,10 +547,6 @@ func CheckoutTransaction(c *gin.Context) {
 			case "PaidAmount":
 				if e.Tag() == "required" {
 					errorsMap["paid_amount"] = "Paid amount wajib diisi"
-				}
-			case "GrandTotal":
-				if e.Tag() == "gte" {
-					errorsMap["grand_total"] = "Grand total minimal 0"
 				}
 			default:
 				errorsMap[e.Field()] = "Validasi gagal"
@@ -653,19 +648,6 @@ func CheckoutTransaction(c *gin.Context) {
     }
 
 	totalAmount := subTotal + (subTotal * (float64(ppn.Ppn) / float64(100)))
-	if totalAmount != p.GrandTotal {
-		tx.Rollback()
-        c.JSON(422, gin.H{
-            "success": false,
-            "message": "Total amount not match",
-            "error": gin.H{
-                "payload": p.GrandTotal,
-                "expected_amount": totalAmount,
-            },
-        })
-		return
-	}
-
 	changeAmount := tr.PaidAmount - totalAmount
 	if changeAmount < 0 {
 		tx.Rollback()
@@ -1005,4 +987,89 @@ func CancelTransaction(c *gin.Context) {
 
     c.JSON(http.StatusOK, response.Success("Transaction cancelled", tr))
 }
+//ADMIN
+func GetAllTransactions(c *gin.Context) {
+    q := strings.TrimSpace(c.DefaultQuery("q", ""))
+    page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
+    if page < 1 { page = 1 }
+    offset := (page-1)*limit
 
+    type txRow struct {
+        ID uint64 `json:"id"`
+        Invoice string `json:"invoice"`
+        TotalItem int `json:"total_item"`
+        TotalQuantity int `json:"total_quantity"`
+        CustomerName string `json:"customer_name"`
+        Kasir string `json:"kasir"`
+        StoreName string `json:"store_name"`
+        Subtotal float64 `json:"subtotal"`
+        Tax float64 `json:"tax"`
+        TotalAmount float64 `json:"total_amount"`
+        Status string `json:"status"`
+        PaymentMethod string `json:"payment_method"`
+        CreatedAt time.Time `json:"created_at"`
+    }
+
+    var rows []txRow
+
+    baseWhere := "WHERE 1=1"
+    args := []interface{}{}
+    if q != "" {
+        like := "%"+q+"%"
+        baseWhere += " AND (t.invoice LIKE ? OR u.name LIKE ? OR m.name LIKE ? OR s.store_name LIKE ?)"
+        args = append(args, like, like, like, like)
+    }
+
+    var total int64
+    countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM transactions t LEFT JOIN users u ON u.id = t.user_id LEFT JOIN members m ON m.id = t.member_id LEFT JOIN store_profiles s ON s.id = t.store_id LEFT JOIN shifts sh ON sh.id = t.shift_id %s`, baseWhere)
+    if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to count transactions", err)
+        return
+    }
+
+    dataSQL := fmt.Sprintf(`
+        SELECT
+            t.id,
+            t.invoice,
+            t.total_item,
+            t.total_quantity,
+            COALESCE(m.name, '') AS customer_name,
+            COALESCE(u.name, 'Unknown') AS kasir,
+            COALESCE(s.store_name, '') AS store_name,
+            t.subtotal,
+            COALESCE(t.subtotal * t.tax / 100, 0) AS tax,
+            t.total_amount,
+            t.status,
+            t.payment_method,
+            t.created_at
+        FROM transactions t
+        LEFT JOIN users u ON u.id = t.user_id
+        LEFT JOIN members m ON m.id = t.member_id
+        LEFT JOIN store_profiles s ON s.id = t.store_id
+        %s
+        ORDER BY t.created_at DESC
+        LIMIT ? OFFSET ?`, baseWhere)
+
+    args = append(args, limit, offset)
+    if err := config.DB.Raw(dataSQL, args...).Scan(&rows).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to fetch transactions", err)
+        return
+    }
+
+    lastPage := int(math.Ceil(float64(total)/float64(limit)))
+    pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(total))
+
+    for i := range rows {
+        rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, "Asia/Jakarta")
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "success": true,
+        "message": "List semua transaksi",
+        "resource": gin.H{
+            "data": rows,
+            "pagination": pagination,
+        },
+    })
+}
