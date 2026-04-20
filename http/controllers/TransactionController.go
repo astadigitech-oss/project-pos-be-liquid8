@@ -914,12 +914,16 @@ func DetailTransactionsShift(c *gin.Context) {
     // lastPage := int(math.Ceil(float64(total)/float64(limit)))
     // pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(total))
 
+    user_closed := "-"
+    if shift.UserClosed != nil {
+        user_closed = shift.UserClosed.Name
+    }
     c.JSON(http.StatusOK, response.Success("Detail Transaction Shift", gin.H{
         "summary": gin.H{
             "start": shift.StartTime,
             "end": shift.EndTime,
             "user_open": shift.UserOpen.Name,
-            "user_closed": shift.UserClosed.Name,
+            "user_closed": user_closed,
             "initial_cash": shift.InitialCash,
             "expected_cash": shift.ExpectedCash,
             "actual_cash": shift.ActualCash,
