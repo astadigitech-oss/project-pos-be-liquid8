@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"liquid8/pos/config"
 	"liquid8/pos/helpers"
@@ -19,22 +20,24 @@ import (
 func ListAllProducts(c *gin.Context) {
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
     if page < 1 {
         page = 1
     }
-    limit := 30
+
     offset := (page - 1) * limit
 
     type productRow struct {
-        ID uint64 `json:"id"`
+        ID      uint64 `json:"id"`
         StoreID uint64 `json:"store_id"`
         Barcode string `json:"barcode"`
-        Name string `json:"name"`
-        Price float64 `json:"price"`
+        Name    string `json:"name"`
+        Price   float64 `json:"price"`
+        TagColor    string `json:"tag_color"`
         Quantity int64 `json:"quantity"`
         Status string `json:"status"`
         StoreName string `json:"store_name"`
-        CreatedAt string `json:"created_at"`
+        CreatedAt time.Time `json:"created_at"`
     }
 
     var rows []productRow
@@ -67,8 +70,10 @@ func ListAllProducts(c *gin.Context) {
 		SELECT 
 			p.id, 
 			p.store_id, 
-			p.barcode, p.name, 
+			p.barcode, 
+            p.name, 
 			p.price, 
+            p.tag_color,
 			p.quantity, 
 			p.status, 
 			COALESCE(s.store_name, '') as store_name, 
@@ -79,6 +84,10 @@ func ListAllProducts(c *gin.Context) {
     if err := config.DB.Raw(dataSQL, args...).Scan(&rows).Error; err != nil {
         helpers.ErrorResponse(c, 500, "Failed to fetch products", err)
         return
+    }
+
+    for i := range rows {
+        rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, "Asia/Jakarta")
     }
 
     lastPage := int(math.Ceil(float64(totalData) / float64(limit)))
