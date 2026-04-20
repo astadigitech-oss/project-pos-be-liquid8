@@ -5,41 +5,65 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"liquid8/pos/config"
 	"liquid8/pos/helpers"
 	"liquid8/pos/http/response"
-	"liquid8/pos/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-// ListPendingMigrateHistories returns pending migrate product histories (status = 'pending')
-func ListPendingMigrateHistories(c *gin.Context) {
+// ListMigrateHistories returns all migrate product histories
+func ListMigrateHistories(c *gin.Context) {
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
     if page < 1 { page = 1 }
-    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
     offset := (page-1)*limit
 
-    db := config.DB.Model(&models.MigrateProductHistory{}).Where("status = ?", "pending")
+    type resultFormat struct {
+        ID             uint64 `json:"id"`
+        StoreID        uint64 `json:"store_id"`
+        StoreName      string `json:"store_name"`
+        Code           string `json:"code"`
+        User           string `json:"user"`
+        TotalProduct   int64  `json:"total_product"`
+        TotalPrice    float64 `json:"total_price"`
+        CreatedAt     time.Time `json:"created_at"`
+    }
+
+    db := config.DB.Table("migrate_product_histories mph").Select(`
+        mph.id, 
+        mph.store_id, 
+        COALESCE(s.store_name, '') AS store_name, 
+        mph.code, 
+        mph.user, 
+        mph.total_product, 
+        mph.total_price, 
+        mph.created_at
+    `).Joins("LEFT JOIN store_profiles s ON s.id = mph.store_id")
     if q != "" {
         like := "%" + q + "%"
         // search by code or user or store name via join
-        db = db.Joins("LEFT JOIN store_profiles s ON s.id = migrate_product_histories.store_id").Where("migrate_product_histories.code LIKE ? OR migrate_product_histories.user LIKE ? OR s.store_name LIKE ?", like, like, like)
+        db = db.Where("mph.code LIKE ? OR mph.user LIKE ? OR s.store_name LIKE ?", like, like, like)
     }
 
     var total int64
     if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "failed to count pending migrate histories", err)
+        helpers.ErrorResponse(c, 500, "failed to count migrate histories", err)
         return
     }
 
-    var rows []models.MigrateProductHistory
-    if err := db.Limit(limit).Offset(offset).Order("created_at desc").Find(&rows).Error; err != nil {
+    var rows []resultFormat
+    if err := db.Limit(limit).Offset(offset).Order("mph.created_at desc").Find(&rows).Error; err != nil {
         helpers.ErrorResponse(c, 500, "failed to fetch pending migrate histories", err)
         return
+    }
+
+    for i := range rows {
+        rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, "Asia/Jakarta")
     }
 
     lastPage := int(math.Ceil(float64(total)/float64(limit)))

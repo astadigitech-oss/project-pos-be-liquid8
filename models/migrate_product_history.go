@@ -13,7 +13,7 @@ type MigrateProductHistory struct {
 	TotalQuantity  	int64   `json:"total_quantity" gorm:"default:0"`
 	TotalPrice     	float64 `json:"total_price" gorm:"type:decimal(15,2);default:0"`
 	TotalBkl     	float64 `json:"total_bkl" gorm:"type:decimal(15,2);default:0"`
-	Status		 	string  `json:"status" gorm:"type:enum('pending','done');default:'pending'"`
+	Status		 	string  `json:"status" gorm:"type:enum('pending','done');default:'done'"`
 	TypeMigration string    `json:"type_migration" gorm:"type:enum('IN','OUT')"`
 
 	CreatedAt time.Time `json:"created_at"`

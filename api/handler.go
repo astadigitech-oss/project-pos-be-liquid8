@@ -75,11 +75,6 @@ func RouteHandler(r *gin.Engine) {
 			rg.POST("transactions/checkout", middleware.ShiftCheck(), controllers.CheckoutTransaction) //TransactionController.go
 			rg.DELETE("transactions/:id", controllers.CancelTransaction) //TransactionController.go
 
-			//========================================
-			// MIGRATE PENDING
-			//========================================
-			rg.GET("migrate-pending", controllers.ListPendingMigrateHistories) //MigrateController.go
-
 		})
 	
 	/*======================= ALL ROLE =======================*/
@@ -134,7 +129,7 @@ func RouteHandler(r *gin.Engine) {
 			//========================================
 			// TRANSACTION
 			//========================================
-			// rg.GET("transactions/all", controllers.AllTransactions) //TransactionController.go
+			rg.GET("transactions/all", controllers.GetAllTransactions) //TransactionController.go
 
 			//========================================
 			// USER
@@ -144,6 +139,11 @@ func RouteHandler(r *gin.Engine) {
 			rg.POST("users", controllers.CreateUser) //UserController.go
 			rg.PUT("users/:id", controllers.UpdateUser) //UserController.go
 			rg.DELETE("users/:id", controllers.DeleteUser) //UserController.go
+
+			//========================================
+			// MIGRATE HISTORY
+			//========================================
+			rg.GET("migrate-history", controllers.ListMigrateHistories) //MigrateController.go
 
 		})
 	}
