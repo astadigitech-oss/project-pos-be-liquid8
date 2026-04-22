@@ -471,7 +471,7 @@ func DeleteProdukBKL(c *gin.Context) {
     }
 
     // =========================
-    // STEP 5: DELETE SAFE DATA
+    // DELETE SAFE DATA
     // =========================
     deletedCount := 0
 
