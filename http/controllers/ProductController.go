@@ -313,3 +313,212 @@ func ReceiveMigrateDocument(c *gin.Context) {
 
     c.JSON(http.StatusOK, response.Success("Migrate product berhasil dilakukan", nil))
 }
+func DeleteProdukBKL(c *gin.Context) {
+    var payload struct {
+        ProductBarcode []string `json:"product_barcode" binding:"required,dive,required"`
+    }
+
+    defer func() {
+        if r := recover(); r != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{
+                "status":  false,
+                "message": "Terjadi kesalahan internal",
+                "error":   fmt.Sprintf("%v", r),
+            })
+        }
+    }()
+
+    if err := c.ShouldBindJSON(&payload); err != nil {
+        errors := response.FormatValidationError(err)
+
+        c.JSON(400, gin.H{
+            "message": "Invalid payload",
+            "errors":  errors,
+        })
+        return
+    }
+
+    if len(payload.ProductBarcode) == 0 {
+        c.JSON(400, gin.H{
+            "message": "Invalid payload",
+            "errors":  []string{"product_barcode must contain at least one barcode"},
+        })
+        return
+    }
+
+    tx := config.DB.WithContext(c.Request.Context()).Begin()
+    if tx.Error != nil {
+        helpers.ErrorResponse(c, 500, "failed to start transaction", tx.Error)
+        return
+    }
+
+    const batchSize = 100
+
+    type ProductLite struct {
+        ID      uint64
+        Barcode string
+        Status  string
+    }
+
+    var products []ProductLite
+
+    // =========================
+    // GET PRODUCTS
+    // =========================
+    for i := 0; i < len(payload.ProductBarcode); i += batchSize {
+        end := i + batchSize
+        if end > len(payload.ProductBarcode) {
+            end = len(payload.ProductBarcode)
+        }
+
+        batch := payload.ProductBarcode[i:end]
+
+        var temp []ProductLite
+        if err := tx.Model(&models.Product{}).
+            Select("id, barcode, status").
+            Where("barcode IN ?", batch).
+            Find(&temp).Error; err != nil {
+
+            tx.Rollback()
+            helpers.ErrorResponse(c, 500, "failed to query products", err)
+            return
+        }
+
+        products = append(products, temp...)
+    }
+
+    if len(products) == 0 {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 404, "no products found", nil)
+        return
+    }
+
+    // =========================
+    // MAP PRODUCT
+    // =========================
+    productMap := make(map[string]ProductLite)
+    var productIDs []uint64
+
+    for _, p := range products {
+        productMap[p.Barcode] = p
+        productIDs = append(productIDs, p.ID)
+    }
+
+    // =========================
+    // CHECK FK USAGE
+    // =========================
+    usedMap := make(map[uint64]struct{})
+
+    // cek cart_items
+    var cartUsed []uint64
+    if err := tx.Model(&models.CartItem{}).
+        Where("product_id IN ?", productIDs).
+        Pluck("DISTINCT product_id", &cartUsed).Error; err != nil {
+
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "failed check cart items", err)
+        return
+    }
+
+    for _, id := range cartUsed {
+        usedMap[id] = struct{}{}
+    }
+
+    // cek transaction_items
+    var trxUsed []uint64
+    if err := tx.Model(&models.TransactionItem{}).
+        Where("product_id IN ?", productIDs).
+        Pluck("DISTINCT product_id", &trxUsed).Error; err != nil {
+
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "failed check transaction items", err)
+        return
+    }
+
+    for _, id := range trxUsed {
+        usedMap[id] = struct{}{}
+    }
+
+    // =========================
+    // SPLIT DATA
+    // =========================
+    var (
+        deletableIDs []uint64
+        missing      []string
+        skippedSale  []string
+        skippedUsed  []string
+    )
+
+    for _, b := range payload.ProductBarcode {
+        p, ok := productMap[b]
+
+        if !ok {
+            missing = append(missing, b)
+            continue
+        }
+
+        if p.Status == "sale" {
+            skippedSale = append(skippedSale, b)
+            continue
+        }
+
+        if _, used := usedMap[p.ID]; used {
+            skippedUsed = append(skippedUsed, b)
+            continue
+        }
+
+        deletableIDs = append(deletableIDs, p.ID)
+    }
+
+    // =========================
+    // STEP 5: DELETE SAFE DATA
+    // =========================
+    deletedCount := 0
+
+    for i := 0; i < len(deletableIDs); i += batchSize {
+        end := i + batchSize
+        if end > len(deletableIDs) {
+            end = len(deletableIDs)
+        }
+
+        batch := deletableIDs[i:end]
+
+        res := tx.Where("id IN ?", batch).
+            Delete(&models.Product{})
+
+        if res.Error != nil {
+            tx.Rollback()
+            helpers.ErrorResponse(c, 500, "failed to delete products", res.Error)
+            return
+        }
+
+        deletedCount += int(res.RowsAffected)
+    }
+
+    // =========================
+    // COMMIT
+    // =========================
+    if err := tx.Commit().Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "commit failed", err)
+        return
+    }
+
+    // =========================
+    // RESPONSE
+    // =========================
+    data := gin.H{
+        "requested_count": len(payload.ProductBarcode),
+        "deleted_count":   deletedCount,
+
+        "skipped_sale_count": len(skippedSale),
+        "skipped_used_count": len(skippedUsed),
+        "missing_count":      len(missing),
+
+        "skipped_sale": skippedSale,
+        "skipped_used": skippedUsed,
+        "missing":      missing,
+    }
+
+    c.JSON(http.StatusOK, response.Success("Produk BKL berhasil diproses", data))
+}

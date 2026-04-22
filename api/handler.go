@@ -157,5 +157,6 @@ func RouteHandler(r *gin.Engine) {
 		//========================================
 		wmsService.GET("destination-stores/sync", controllers.ListStoresForSync) //StoreController.go
 		wmsService.POST("products/store", controllers.ReceiveMigrateDocument) //ProductController.go
+		wmsService.DELETE("products-bkl", controllers.DeleteProdukBKL) //ProductController.go
 	}
 }
