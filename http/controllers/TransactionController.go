@@ -724,17 +724,14 @@ func GetTransactionHistories(c *gin.Context) {
     )
     // akhir hari ini (23:59:59)
     endDate := startDate.Add(24*time.Hour - time.Nanosecond)
-    fmt.Println("Jakarta:", startDate, endDate)
     startDate = startDate.UTC()
     endDate = endDate.UTC()
-    fmt.Println("UTC:", startDate, endDate)
 
-    fmt.Print(startDate, endDate)
     baseWhere := "WHERE t.created_at >= ? AND t.created_at <= ?"
     args := []interface{}{startDate, endDate}
     if q != "" {
         like := "%"+q+"%"
-        baseWhere += "AND (t.invoice LIKE ? OR u.name LIKE ? OR s.store_name LIKE ?)"
+        baseWhere += " AND (t.invoice LIKE ? OR u.name LIKE ? OR s.store_name LIKE ?)"
         args = append(args, like, like, like)
     }
     
