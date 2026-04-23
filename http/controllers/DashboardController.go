@@ -108,7 +108,11 @@ func GetDashboardData(c *gin.Context) {
 func GetTotalSalesByFilter(c *gin.Context) {
 	period := c.DefaultQuery("period", "week")
 
-	now := helpers.GetCurentTime("Asia/Jakarta")
+	now, err := helpers.GetCurentTime("Asia/Jakarta")
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal mendapatkan waktu sekarang", err)
+		return
+	}
 
 	var start time.Time
 	var end time.Time

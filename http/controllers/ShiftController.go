@@ -23,6 +23,17 @@ func StartShift(c *gin.Context) {
 		InitialCash float64 `json:"initial_cash" binding:"required,gte=0"`
 	}
 
+	// Pastikan Rollback jika terjadi panic
+    defer func() {
+        if r := recover(); r != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false, 
+				"message": "Internal server error",
+				"error": fmt.Sprintf("%v", r),
+			})
+        }
+    }()
+
 	var payload payloadRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		ve, ok := err.(validator.ValidationErrors)
@@ -63,7 +74,12 @@ func StartShift(c *gin.Context) {
 	}
 
 	// prepare shift
-	now := helpers.GetCurentTime(user.Store.Timezone) // Asia/Jakarta
+	fmt.Println(user)
+	now, err := helpers.GetCurentTime(user.Store.Timezone)
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal mendapatkan waktu sekarang", err)
+		return
+	}
 	shift := models.Shift{
 		StoreID:     storeID,
 		OpenBy:      uint64(user.ID),
@@ -143,7 +159,12 @@ func EndShift(c *gin.Context) {
 	// 	return
 	// }
 
-	now := helpers.GetCurentTime(user.Store.Timezone) // Asia/Jakarta
+	now, err := helpers.GetCurentTime(user.Store.Timezone)
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal mendapatkan waktu sekarang", err)
+		return
+	}
+	
 	expectedCash, err := helpers.RecalculateShiftExpectedCash(config.DB, storeID, shift.ID)
 	if err != nil {
 		helpers.ErrorResponse(c, 422, "Recalculate expected cash gagal", err)

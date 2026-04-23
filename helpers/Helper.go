@@ -142,11 +142,15 @@ func GetToday() string {
 
 	return startOfDayInJakarta.Format("2006-01-02")
 }
-func GetCurentTime(tz string) time.Time {
-	location, _ := time.LoadLocation(tz)
-	nowInLocation := time.Now().In(location)
+func GetCurentTime(tz string) (time.Time, error) {
+	location, err := time.LoadLocation(tz)
+	if err != nil {
+		fmt.Println("Invalid timezone:", tz)
+		return time.Time{}, err
+	}
 
-	return nowInLocation
+	nowInLocation := time.Now().In(location)
+	return nowInLocation, nil
 }
 func ToLocalTime(t time.Time, tz string) time.Time {
 	location, _ := time.LoadLocation(tz)

@@ -600,7 +600,12 @@ func CheckoutTransaction(c *gin.Context) {
 		return
 	}
 
-    now := helpers.GetCurentTime(user.Store.Timezone)
+    now, err := helpers.GetCurentTime(user.Store.Timezone)
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal mendapatkan waktu sekarang", err)
+		return
+	}
+    
     tr := models.Transaction{
         StoreID: storeID,
         UserID: uint64(user.ID),
@@ -706,7 +711,11 @@ func GetTransactionHistories(c *gin.Context) {
 
     var rows []txRow
 
-    now := helpers.GetCurentTime(user.Store.Timezone)
+    now, err := helpers.GetCurentTime(user.Store.Timezone)
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal mendapatkan waktu sekarang", err)
+		return
+	}
     // awal hari ini (00:00:00)
     startDate := time.Date(
         now.Year(), now.Month(), now.Day(),

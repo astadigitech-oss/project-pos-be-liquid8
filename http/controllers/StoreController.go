@@ -188,7 +188,11 @@ func StoreTransactionsHistories(c *gin.Context) {
 	offset := (page - 1) * limit
 
 	// determine current week's Monday..Sunday in store timezone
-	now := helpers.GetCurentTime("Asia/Jakarta")
+	now, err := helpers.GetCurentTime("Asia/Jakarta")
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal mendapatkan waktu sekarang", err)
+		return
+	}
 	// weekday := int(now.Weekday())
 	// if weekday == 0 { weekday = 7 } // Sunday -> 7
 	start := time.Date(now.Year(), now.Month(), now.Day()-7, 0, 0, 0, 0, now.Location())
@@ -269,7 +273,11 @@ func StoreShiftsHistories(c *gin.Context) {
 	if page < 1 { page = 1 }
 	offset := (page - 1) * limit
 
-	now := helpers.GetCurentTime("Asia/Jakarta")
+	now, err := helpers.GetCurentTime("Asia/Jakarta")
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal mendapatkan waktu sekarang", err)
+		return
+	}
 	// weekday := int(now.Weekday())
 	// if weekday == 0 { weekday = 7 }
 	start := time.Date(now.Year(), now.Month(), now.Day()-7, 0, 0, 0, 0, now.Location())
