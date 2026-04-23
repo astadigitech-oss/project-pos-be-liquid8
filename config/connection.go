@@ -21,7 +21,7 @@ func InitDB() {
 		// coba load dari Current Working Directory
 		err = godotenv.Load() 
 		if err != nil {
-			log.Fatal("Gagal memuat .env ", err)
+			log.Println("⚠️ .env tidak ditemukan, menggunakan environment system")
 		}
 	}
 
@@ -31,12 +31,16 @@ func InitDB() {
 	port := os.Getenv("DB_PORT")
 	name := os.Getenv("DB_NAME")
 
+	if user == "" || host == "" || port == "" || name == "" {
+		log.Fatal("❌ Config database tidak lengkap (cek ENV)")
+	}
+
 	//koneksi database mysql => {user}:{pass}@tcp({host}:{port})/{database}
 	query := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&loc=UTC", user, pass, host, port, name)
 
 	db, err := gorm.Open(mysql.Open(query), &gorm.Config{})
 	if err != nil {
-		log.Fatal("Gagal koneksi ke database : ", err)
+		log.Fatal("❌ Gagal koneksi ke database: ", err)
 	}
 
 	DB = db
