@@ -1,25 +1,33 @@
-FROM golang:1.24.5-alpine
+# =========================
+# BUILD STAGE
+# =========================
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-RUN apk add --no-cache \
-    git \
-    bash \
-    curl \
-    tzdata
-
-RUN curl -L https://github.com/golang-migrate/migrate/releases/download/v4.15.2/migrate.linux-amd64.tar.gz \
-    | tar xvz \
- && mv migrate /usr/local/bin/migrate
+# install git (penting untuk go mod)
+RUN apk add --no-cache git
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
-ENV PORT=8080
-ENV TZ=Asia/Jakarta
+# build binary
+RUN go build -o app
+
+# =========================
+# RUN STAGE (lebih ringan)
+# =========================
+FROM alpine:latest
+
+WORKDIR /app
+
+# optional (timezone + cert)
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /app/app .
 
 EXPOSE 8080
 
-CMD ["go", "run", "main.go"]
+CMD ["./app"]
