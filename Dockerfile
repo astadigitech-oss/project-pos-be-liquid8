@@ -12,7 +12,10 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o app
+# Build semua binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app ./main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o migrate ./cmd/migrate/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o seeder ./cmd/seeder/main.go
 
 # =========================
 # STAGE 2: RUNTIME
@@ -25,7 +28,10 @@ RUN apk add --no-cache \
     ca-certificates \
     bash
 
+# Copy semua binary
 COPY --from=builder /app/app .
+COPY --from=builder /app/migrate .
+COPY --from=builder /app/seeder .
 
 EXPOSE 5002
 
