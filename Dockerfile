@@ -26,7 +26,8 @@ WORKDIR /app
 
 RUN apk add --no-cache \
 ca-certificates \
-bash
+bash \
+tzdata
 
 # Set timezone (contoh: Asia/Jakarta)
 ENV TZ=Asia/Jakarta
