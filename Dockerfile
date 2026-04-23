@@ -15,7 +15,7 @@ COPY . .
 # Build semua binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app ./main.go
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o migrate ./cmd/migrate/main.go
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o seeder ./cmd/seeder/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o seeder ./cmd/seeders/main.go
 
 # =========================
 # STAGE 2: RUNTIME
