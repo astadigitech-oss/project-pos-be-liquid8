@@ -783,6 +783,7 @@ func GetTransactionHistories(c *gin.Context) {
 }
 func DetailTransaction(c *gin.Context) {
     user := c.MustGet("auth_user").(models.User)
+
     idParam := c.Param("id")
     id, err := strconv.ParseUint(idParam, 10, 64)
     if err != nil {
@@ -790,20 +791,105 @@ func DetailTransaction(c *gin.Context) {
         return
     }
 
-    var tx models.Transaction
-    if err := config.DB.Preload("User").
-        Preload("Store").Preload("Items").
-        First(&tx, id).Error; err != nil {
+    type transactionItemResponse struct {
+        ID       uint64  `json:"id"`
+        Barcode  string  `json:"barcode"`
+        ProductName     string  `json:"product_name"`
+        Price    float64 `json:"price"`
+        Quantity int64   `json:"quantity"`
+    }
+
+    // 🔹 Struct response
+    var result struct {
+        ID        uint64  `json:"id"`
+        Invoice   string  `json:"invoice"`
+        StoreID   uint64  `json:"store_id"`
+        StoreName string  `json:"store_name"`
+        Kasir     string  `json:"kasir"`
+        CustomerName string `json:"customer_name"`
+        Tax       float64 `json:"tax"`
+        TotalItem    int     `json:"total_item"`
+        TotalQuantity int     `json:"total_quantity"`
+        PaidAmount float64 `json:"paid_amount"`
+        ChangeAmount float64 `json:"change_amount"`
+        PaymentMethod string  `json:"payment_method"`
+        Subtotal  float64 `json:"subtotal"`
+        TotalAmount  float64 `json:"total_amount"`
+        Status string `json:"status"`
+        CreatedAt time.Time  `json:"created_at"`
+
+        Items []transactionItemResponse `json:"items" gorm:"-"`
+
+        Ppn struct {
+            Amount  float64 `json:"amount"`
+            Tax     float64 `json:"tax"`
+        } `json:"ppn" gorm:"-"`
+    }
+
+    query := `
+        SELECT 
+            t.id,
+            t.invoice,
+            t.store_id,
+            COALESCE(s.store_name, '') as store_name,
+            COALESCE(u.name, 'Unknown') as kasir,
+            COALESCE(m.name, 'Unknown') as customer_name,
+            t.tax,
+            t.total_item,
+            t.total_quantity,
+            t.paid_amount,
+            t.change_amount,
+            t.payment_method,
+            t.subtotal,
+            t.total_amount,
+            t.status,
+            t.created_at
+        FROM transactions t
+        LEFT JOIN store_profiles s ON s.id = t.store_id
+        LEFT JOIN users u ON u.id = t.user_id
+        LEFT JOIN members m ON m.id = t.member_id
+        WHERE t.id = ?
+        LIMIT 1
+    `
+
+    if err := config.DB.Raw(query, id).Scan(&result).Error; err != nil {
         helpers.ErrorResponse(c, 404, "Transaction not found", err)
         return
     }
 
-    tx.ToLocal(user.Store.Timezone)
+    // ambil items
+    var items []transactionItemResponse
+    queryItems := `
+        SELECT 
+            ti.id,
+            p.barcode,
+            ti.product_name,
+            ti.price,
+            ti.quantity
+        FROM transaction_items ti
+        LEFT JOIN products p ON p.id = ti.product_id
+        WHERE ti.transaction_id = ?
+    `
+
+    if err := config.DB.Raw(queryItems, id).Scan(&items).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed get items", err)
+        return
+    }
+
+    result.Items = items
+
+    ppnPercent := result.Tax
+    ppnTotal := result.Subtotal * (ppnPercent / 100)
+
+    result.Ppn.Tax = ppnPercent
+    result.Ppn.Amount = ppnTotal
+
+    result.CreatedAt = helpers.ToLocalTime(result.CreatedAt, user.Store.Timezone)
 
     c.JSON(http.StatusOK, gin.H{
-        "success": true,
-        "message": "Detail transaksi",
-        "resource": tx,
+        "success":  true,
+        "message":  "Detail transaksi",
+        "resource": result,
     })
 }
 func DetailTransactionsShift(c *gin.Context) {
