@@ -188,11 +188,11 @@ func ReceiveMigrateDocument(c *gin.Context) {
         Products     []struct {
             CodeDocument  		*string     `json:"code_document"`
             OldBarcode		 	*string  	`json:"old_barcode"`
-            OldPrice		  	float64		`json:"old_price" binding:"required"`
-            ActualPrice			float64		`json:"actual_price" binding:"required"`
+            OldPrice		  	float64		`json:"old_price"`
+            ActualPrice			float64		`json:"actual_price"`
             Barcode       		string     	`json:"barcode" binding:"required"`
             Name          		string     	`json:"name" binding:"required"`
-            Price         		float64    	`json:"price" binding:"required"`
+            Price         		float64    	`json:"price"`
             Quantity      		int64      	`json:"quantity" binding:"required"`
             Status        		string     	`json:"status" binding:"required"`
             TagColor    		string     	`json:"tag_color" binding:"required"`
