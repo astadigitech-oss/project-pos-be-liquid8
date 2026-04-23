@@ -782,8 +782,7 @@ func GetTransactionHistories(c *gin.Context) {
     })
 }
 func DetailTransaction(c *gin.Context) {
-    user := c.MustGet("auth_user").(models.User)
-
+    // user := c.MustGet("auth_user").(models.User)
     idParam := c.Param("id")
     id, err := strconv.ParseUint(idParam, 10, 64)
     if err != nil {
@@ -803,11 +802,8 @@ func DetailTransaction(c *gin.Context) {
     var result struct {
         ID        uint64  `json:"id"`
         Invoice   string  `json:"invoice"`
-        StoreID   uint64  `json:"store_id"`
-        StoreName string  `json:"store_name"`
         Kasir     string  `json:"kasir"`
-        CustomerName string `json:"customer_name"`
-        Tax       float64 `json:"tax"`
+        CustomerName string `json:"customer_name"`       
         TotalItem    int     `json:"total_item"`
         TotalQuantity int     `json:"total_quantity"`
         PaidAmount float64 `json:"paid_amount"`
@@ -817,45 +813,48 @@ func DetailTransaction(c *gin.Context) {
         TotalAmount  float64 `json:"total_amount"`
         Status string `json:"status"`
         CreatedAt time.Time  `json:"created_at"`
-
-        Items []transactionItemResponse `json:"items" gorm:"-"`
+        Store struct {
+            Name string `json:"name"`
+            Phone string `json:"phone"`
+            Address string `json:"address"`
+        } `json:"store"`
 
         Ppn struct {
-            Amount  float64 `json:"amount"`
-            Tax     float64 `json:"tax"`
-        } `json:"ppn" gorm:"-"`
+            Tax   float64 `json:"tax"`
+            Amount float64 `json:"amount"`
+        } `json:"ppn"`
+
+        Items []transactionItemResponse `json:"items"`
     }
 
-    query := `
-        SELECT 
-            t.id,
-            t.invoice,
-            t.store_id,
-            COALESCE(s.store_name, '') as store_name,
-            COALESCE(u.name, 'Unknown') as kasir,
-            COALESCE(m.name, 'Unknown') as customer_name,
-            t.tax,
-            t.total_item,
-            t.total_quantity,
-            t.paid_amount,
-            t.change_amount,
-            t.payment_method,
-            t.subtotal,
-            t.total_amount,
-            t.status,
-            t.created_at
-        FROM transactions t
-        LEFT JOIN store_profiles s ON s.id = t.store_id
-        LEFT JOIN users u ON u.id = t.user_id
-        LEFT JOIN members m ON m.id = t.member_id
-        WHERE t.id = ?
-        LIMIT 1
-    `
-
-    if err := config.DB.Raw(query, id).Scan(&result).Error; err != nil {
+    var tx models.Transaction
+    if err := config.DB.Preload("User").Preload("Member").Preload("Store").First(&tx, id).Error; err != nil {
         helpers.ErrorResponse(c, 404, "Transaction not found", err)
         return
     }
+
+    tx.ToLocal(tx.Store.Timezone)
+
+    result.ID = tx.ID
+    result.Invoice = tx.Invoice
+    result.Kasir = tx.User.Name
+    result.CustomerName = tx.Member.Name
+    result.TotalItem = tx.TotalItem
+    result.TotalQuantity = tx.TotalQuantity
+    result.PaidAmount = tx.PaidAmount
+    result.ChangeAmount = tx.ChangeAmount
+    result.PaymentMethod = tx.PaymentMethod
+    result.Subtotal = tx.Subtotal
+    result.TotalAmount = tx.TotalAmount
+    result.Status = tx.Status
+    result.CreatedAt = tx.CreatedAt
+    
+    result.Store.Name = tx.Store.StoreName
+    result.Store.Phone = tx.Store.Phone
+    result.Store.Address = tx.Store.Address
+    
+    result.Ppn.Tax = tx.Tax
+    result.Ppn.Amount = tx.Subtotal * tx.Tax / 100
 
     // ambil items
     var items []transactionItemResponse
@@ -877,14 +876,6 @@ func DetailTransaction(c *gin.Context) {
     }
 
     result.Items = items
-
-    ppnPercent := result.Tax
-    ppnTotal := result.Subtotal * (ppnPercent / 100)
-
-    result.Ppn.Tax = ppnPercent
-    result.Ppn.Amount = ppnTotal
-
-    result.CreatedAt = helpers.ToLocalTime(result.CreatedAt, user.Store.Timezone)
 
     c.JSON(http.StatusOK, gin.H{
         "success":  true,
@@ -910,6 +901,7 @@ func DetailTransactionsShift(c *gin.Context) {
 
     var shift models.Shift
     if err := config.DB.
+        Preload("Store").
         Preload("UserOpen").
         Preload("UserClosed").
         First(&shift, shiftID).Error; err != nil {
@@ -952,6 +944,29 @@ func DetailTransactionsShift(c *gin.Context) {
         DiscountPrice float64 `json:"discount_price"`
         Subtotal float64 `json:"subtotal"`
         CreatedAt time.Time `json:"created_at"`
+    }
+
+    var result struct { 
+        Start           time.Time  `json:"start"`
+        End             *time.Time `json:"end"` // pointer kalau bisa null
+        UserOpen        string     `json:"user_open"`
+        UserClosed      string    `json:"user_closed"` // pointer kalau bisa null
+        InitialCash     float64    `json:"initial_cash"`
+        ExpectedCash    float64    `json:"expected_cash"`
+        ActualCash      float64    `json:"actual_cash"`
+        Difference      float64    `json:"difference"`
+        Note            *string    `json:"note"` // optional
+        TotalInvoice    int64      `json:"total_invoice"`
+        TotalSubtotal   float64    `json:"total_subtotal"`
+        TotalTax        float64    `json:"total_tax"`
+        TotalPenjualan  float64    `json:"total_penjualan"`
+        Store struct {
+            Name  string  `json:"name"`
+            Phone string `json:"phone"`
+            Address string `json:"address"`
+        } `json:"store"`
+
+        Items []txItemRow `json:"items"`
     }
 
     var rows []txItemRow
@@ -1010,24 +1025,26 @@ func DetailTransactionsShift(c *gin.Context) {
     if shift.UserClosed != nil {
         user_closed = shift.UserClosed.Name
     }
-    c.JSON(http.StatusOK, response.Success("Detail Transaction Shift", gin.H{
-        "summary": gin.H{
-            "start": shift.StartTime,
-            "end": shift.EndTime,
-            "user_open": shift.UserOpen.Name,
-            "user_closed": user_closed,
-            "initial_cash": shift.InitialCash,
-            "expected_cash": shift.ExpectedCash,
-            "actual_cash": shift.ActualCash,
-            "difference": shift.Difference,
-            "note": shift.Note,
-            "total_invoice": summary.TotalInvoice,
-            "total_subtotal": summary.TotalSubtotal,
-            "total_tax": summary.TotalTax,
-            "total_penjualan": summary.TotalAmount,
-        },
-        "items": rows,
-    }))
+
+    result.Start = shift.StartTime
+    result.End = shift.EndTime
+    result.UserOpen = shift.UserOpen.Name
+    result.UserClosed = user_closed
+    result.InitialCash = shift.InitialCash
+    result.ExpectedCash = shift.ExpectedCash
+    result.ActualCash = shift.ActualCash
+    result.Difference = shift.Difference
+    result.Note = shift.Note
+    result.TotalInvoice = summary.TotalInvoice
+    result.TotalSubtotal = summary.TotalSubtotal
+    result.TotalTax = summary.TotalTax
+    result.TotalPenjualan = summary.TotalAmount
+    result.Store.Name = shift.Store.StoreName
+    result.Store.Phone = shift.Store.Phone
+    result.Store.Address = shift.Store.Address
+    result.Items = rows
+
+    c.JSON(http.StatusOK, response.Success("Detail Transaction Shift", result))
 }
 func CancelTransaction(c *gin.Context) {
     txIDParam := c.Param("id")
