@@ -1,68 +1,46 @@
 # =========================
-# STAGE 1: Build Frontend (Vite)
+# STAGE 1: BUILD
 # =========================
-FROM node:20-alpine AS node-builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
-COPY package*.json ./
-RUN npm install
+RUN apk add --no-cache git
 
-# Copy source & build
+COPY go.mod go.sum ./
+RUN go mod download
+
 COPY . .
-RUN npm run build
 
+# Build semua binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app ./main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o migrate ./cmd/migrate/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o seeder ./cmd/seeders/main.go
 
 # =========================
-# STAGE 2: Laravel Runtime
+# STAGE 2: RUNTIME
 # =========================
-FROM php:8.3-cli-alpine
+FROM alpine:3.19
 
-# Install system dependencies
+WORKDIR /app
+
 RUN apk add --no-cache \
-    bash \
-    curl \
-    libpng-dev \
-    libjpeg-turbo-dev \
-    freetype-dev \
-    zip \
-    unzip \
-    git \
-    oniguruma-dev
+ca-certificates \
+bash
 
-# Install PHP extensions
-RUN docker-php-ext-configure gd \
-    --with-freetype \
-    --with-jpeg \
-    && docker-php-ext-install \
-    pdo \
-    pdo_mysql \
-    mbstring \
-    exif \
-    pcntl \
-    bcmath \
-    gd
+# Set timezone (contoh: Asia/Jakarta)
+ENV TZ=Asia/Jakarta
 
-# Install Composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+# Apply timezone ke sistem
+RUN cp /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone
 
-WORKDIR /var/www
 
-# Copy project source
-COPY . .
+# Copy semua binary
+COPY --from=builder /app/app .
+COPY --from=builder /app/migrate .
+COPY --from=builder /app/seeder .
 
-# Install Laravel dependencies (tanpa scripts biar aman dari error .env)
-RUN composer install --no-dev --optimize-autoloader --no-scripts
+EXPOSE 5002
 
-# Copy hasil build Vite dari stage 1
-COPY --from=node-builder /app/public/build /var/www/public/build
-
-# Set permission
-RUN chown -R www-data:www-data storage bootstrap/cache
-
-# Expose port artisan serve
-EXPOSE 8000
-
-# Run Laravel
-CMD php artisan serve --host=0.0.0.0 --port=8000
+CMD ["./app"]
