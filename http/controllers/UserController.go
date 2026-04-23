@@ -378,6 +378,7 @@ func UpdateProfile(c *gin.Context) {
 
 	var req struct {
 		Name     string `json:"name" binding:"required"`
+		Username string `json:"username" binding:"required"`
 		Email    string `json:"email" binding:"required,email"`
 	}
 
@@ -399,6 +400,8 @@ func UpdateProfile(c *gin.Context) {
 			switch field {
 			case "name":
 				errors["name"] = "Nama wajib diisi"
+			case "username":
+				errors["username"] = "Username wajib diisi"
 			case "email":
 				if e.Tag() == "email" {
 					errors["email"] = "Format email tidak valid"
@@ -416,27 +419,34 @@ func UpdateProfile(c *gin.Context) {
 		return
 	}	
 
-	var count int64
+	var userOther models.User
 	if err := config.DB.
 		Model(&models.User{}).
-		Where("email = ? AND id != ?", req.Email, user.ID).
-		Count(&count).Error; err != nil {
+		Where("email = ? AND username = ? AND id != ?", req.Email, req.Username, user.ID).
+		First(&userOther).Error; err != nil {
 
 		helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal memeriksa email", err)
 		return
 	}
 
-	if count > 0 {
+	if userOther.Email == req.Email {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  false,
 			"message": "Email sudah digunakan",
 		})
 		return
+	}else if userOther.Username == req.Username {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  false,
+			"message": "Username sudah digunakan",
+		})
+		return
 	}
 
 	user_update := map[string]interface{}{
-		"name":  req.Name,
-		"email": req.Email,
+		"name":     req.Name,
+		"username": req.Username,
+		"email":    req.Email,
 	}
 
 	if err := config.DB.Model(&user).Updates(user_update).Error; err != nil {
