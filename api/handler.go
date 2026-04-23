@@ -92,14 +92,6 @@ func RouteHandler(r *gin.Engine) {
 		protected.GET("users-info", controllers.UserInfo) //UserController.go
 		protected.PUT("users-profile", controllers.UpdateProfile) //UserController.go
 		protected.PUT("users-password", controllers.ChangePassword) //UserController.go
-		//========================================
-		// STORE PROFILE
-		//========================================
-		protected.GET("stores", controllers.ListStores) //StoreController.go
-		protected.GET("stores/:id", controllers.DetailStore) //StoreController.go
-		protected.POST("stores", controllers.CreateStore) //StoreController.go
-		protected.PUT("stores/:id", controllers.UpdateStore) //StoreController.go
-		protected.DELETE("stores/:id", controllers.DeleteStore) //StoreController.go
 
 	/*======================= ADMIN ONLY =======================*/
 		roleGroup(protected, []string{"superadmin","admin"}, func(rg *gin.RouterGroup) {
@@ -118,14 +110,17 @@ func RouteHandler(r *gin.Engine) {
 			//statistik dashboard
 			rg.GET("dashboard/index", controllers.GetDashboardData) //DashboardController.go
 			rg.GET("dashboard/sales-total", controllers.GetTotalSalesByFilter) //DashboardController.go
-			//Menu Toko
-			rg.GET("dashboard/list-stores", controllers.ListStores) //StoreController.go
 			
 			//========================================
-			// PRODUCT
+			// TOKO
 			//========================================
-			rg.GET("products", controllers.ListAllProducts) //ProductController.go
-			
+			rg.GET("stores", controllers.ListStores) //StoreController.go
+			rg.GET("stores/:id", controllers.DetailStore) //StoreController.go
+			rg.GET("stores/:id/transaction-histories", controllers.StoreTransactionsHistories) //StoreController.go
+			rg.GET("stores/:id/shift-histories", controllers.StoreShiftsHistories) //StoreController.go
+			rg.POST("stores", controllers.CreateStore) //StoreController.go
+			rg.PUT("stores/:id", controllers.UpdateStore) //StoreController.go
+
 			//========================================
 			// TRANSACTION
 			//========================================
@@ -144,6 +139,11 @@ func RouteHandler(r *gin.Engine) {
 			// MIGRATE HISTORY
 			//========================================
 			rg.GET("migrate-history", controllers.ListMigrateHistories) //MigrateController.go
+
+			//========================================
+			// INVENTORY / PRODUK
+			//========================================
+			rg.GET("products", controllers.ListAllProducts) //ProductController.go
 
 		})
 	}
