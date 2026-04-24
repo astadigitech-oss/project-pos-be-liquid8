@@ -394,7 +394,7 @@ func GetCurrentCart(c *gin.Context) {
         totalQuantity += it.Quantity
     }
 
-    ppn_price := totalSubtotal * (ppn.Ppn / 100)
+    ppn_price := math.Round(totalSubtotal * (ppn.Ppn / 100))
     payload := gin.H{
         "items": items,
         "subtotal": totalSubtotal,
@@ -402,7 +402,7 @@ func GetCurrentCart(c *gin.Context) {
             "tax": ppn.Ppn,
             "amount": ppn_price,
         },
-        "total_amount": totalSubtotal + ppn_price,
+        "total_amount": math.Round(totalSubtotal + ppn_price),
     }
 
     c.JSON(http.StatusOK, response.Success("Current cart", payload))
@@ -674,8 +674,8 @@ func CheckoutTransaction(c *gin.Context) {
 		subTotal += it.Subtotal
     }
 
-    ppnAmount := subTotal * (ppn.Ppn / 100)
-	totalAmount := subTotal + ppnAmount
+    ppnAmount := math.Round(subTotal * (ppn.Ppn / 100))
+	totalAmount := math.Round(subTotal + ppnAmount)
 	changeAmount := tr.PaidAmount - totalAmount
 	if changeAmount < 0 {
 		tx.Rollback()
@@ -891,7 +891,7 @@ func DetailTransaction(c *gin.Context) {
     result.ChangeAmount = tx.ChangeAmount
     result.PaymentMethod = tx.PaymentMethod
     result.Subtotal = tx.Subtotal
-    result.TotalAmount = tx.TotalAmount
+    result.TotalAmount = math.Round(tx.TotalAmount)
     result.Status = tx.Status
     result.CreatedAt = tx.CreatedAt
     
@@ -900,7 +900,7 @@ func DetailTransaction(c *gin.Context) {
     result.Store.Address = tx.Store.Address
     
     result.Ppn.Tax = tx.Tax
-    result.Ppn.Amount = tx.Subtotal * tx.Tax / 100
+    result.Ppn.Amount = math.Round(tx.Subtotal * tx.Tax / 100)
 
     // ambil items
     var items []transactionItemResponse
@@ -1083,8 +1083,8 @@ func DetailTransactionsShift(c *gin.Context) {
     result.Note = shift.Note
     result.TotalInvoice = summary.TotalInvoice
     result.TotalSubtotal = summary.TotalSubtotal
-    result.TotalTax = summary.TotalTax
-    result.TotalPenjualan = summary.TotalAmount
+    result.TotalTax = math.Round(summary.TotalTax)
+    result.TotalPenjualan = math.Round(summary.TotalAmount)
     result.Store.Name = shift.Store.StoreName
     result.Store.Phone = shift.Store.Phone
     result.Store.Address = shift.Store.Address
