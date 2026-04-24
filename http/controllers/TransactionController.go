@@ -509,12 +509,12 @@ func CheckoutTransaction(c *gin.Context) {
 		}
 	}()
 
-    storeID := uint64(0)
-    if user.StoreID == nil {
+    // storeID := uint64(0)
+    if user.Store == nil {
 		helpers.ErrorResponse(c, 400, "User does not have store ID", nil)
 		return
 	}
-	storeID = *user.StoreID
+    storeID := uint64(user.Store.ID)
 
     type payload struct {
 		MemberID	uint64	`json:"member_id" binding:"required"`
@@ -629,6 +629,11 @@ func CheckoutTransaction(c *gin.Context) {
 
     totalQty := 0
 	subTotal := float64(0)
+    type txRowModel struct {
+        Name     string  `json:"product_name"`
+        Price    float64 `json:"price"`
+    }
+    var txRow []txRowModel
     // migrate items
     for _, it := range items {
         ti := models.TransactionItem{
@@ -642,6 +647,11 @@ func CheckoutTransaction(c *gin.Context) {
             Subtotal: it.Subtotal,
         }
 
+        txRow = append(txRow, txRowModel{
+            Name:     it.ProductName,
+            Price:    it.Price,
+        })
+
         if err := tx.Create(&ti).Error; err != nil {
             tx.Rollback()
             helpers.ErrorResponse(c, 500, "Failed to create transaction item", err)
@@ -652,7 +662,8 @@ func CheckoutTransaction(c *gin.Context) {
 		subTotal += it.Subtotal
     }
 
-	totalAmount := subTotal + (subTotal * (float64(ppn.Ppn) / float64(100)))
+    ppnAmount := subTotal * (ppn.Ppn / 100)
+	totalAmount := subTotal + ppnAmount
 	changeAmount := tr.PaidAmount - totalAmount
 	if changeAmount < 0 {
 		tx.Rollback()
@@ -683,7 +694,30 @@ func CheckoutTransaction(c *gin.Context) {
         return
     }
 
-    c.JSON(http.StatusOK, response.Success("Transaction saved", tr))
+    c.JSON(http.StatusOK, response.Success("Transaction saved", gin.H{
+        "id": tr.ID,
+        "invoice": invoice,
+        "kasir": user.Name,
+        "customer_name": member.Name,
+        "total_item": tr.TotalItem,
+        "total_quantity": tr.TotalQuantity,
+        "paid_amount": tr.PaidAmount,
+        "change_amount": tr.ChangeAmount,
+        "payment_method": tr.PaymentMethod,
+        "subtotal": tr.Subtotal,
+        "total_amount": tr.TotalAmount,
+        "created_at": helpers.ToLocalTime(tr.CreatedAt, user.Store.Timezone),
+        "store": gin.H{
+            "name": user.Store.StoreName,
+            "phone": user.Store.Phone,
+            "address": user.Store.Address,
+        },
+        "ppn": gin.H{
+            "tax": ppn.Ppn,
+            "amount": ppnAmount,
+        },
+        "items": txRow,
+    }))
 }
 func GetTransactionHistories(c *gin.Context) {
     user := c.MustGet("auth_user").(models.User)
