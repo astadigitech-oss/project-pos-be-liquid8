@@ -258,7 +258,19 @@ func ListPending(c *gin.Context) {
         return
     }
 
-    dataSQL := "SELECT m.name AS customer_name, ci.keep_code, COUNT(*) AS item_count, COALESCE(SUM(ci.subtotal),0) AS total FROM cart_items ci JOIN members m ON ci.member_id = m.id " + baseWhere + " GROUP BY ci.keep_code, m.name ORDER BY ci.created_at DESC LIMIT ? OFFSET ?"
+    dataSQL := fmt.Sprintf(`
+        SELECT 
+            MAX(m.name) AS customer_name,
+            ci.keep_code,
+            COUNT(*) AS item_count,
+            COALESCE(SUM(ci.subtotal),0) AS total
+        FROM cart_items ci 
+        JOIN members m ON ci.member_id = m.id 
+        %s
+        GROUP BY ci.keep_code
+        ORDER BY MAX(ci.created_at) DESC
+        LIMIT ? OFFSET ?
+    `, baseWhere)
     args = append(args, limit, offset)
     if err := config.DB.Raw(dataSQL, args...).Scan(&groups).Error; err != nil {
         helpers.ErrorResponse(c, 500, "Failed to list pending groups", err)
