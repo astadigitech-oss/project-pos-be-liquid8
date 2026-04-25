@@ -15,6 +15,7 @@ type Transaction struct {
 	MemberPoint   int `json:"member_point" gorm:"default:0"`
 	Subtotal     float64 `json:"subtotal" gorm:"type:decimal(18,2);default:0"`
 	Tax          float64 `json:"tax" gorm:"type:decimal(18,2);default:0"`
+	TaxPrice	 float64 `json:"tax_price" gorm:"type:decimal(18,2);default:0"`
 	Discount     float64 `json:"discount" gorm:"type:decimal(18,2);default:0"`
 	TotalAmount  float64 `json:"total_amount" gorm:"type:decimal(18,2);default:0"`
 	PaidAmount   float64 `json:"paid_amount" gorm:"type:decimal(18,2);default:0"`

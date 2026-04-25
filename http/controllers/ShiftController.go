@@ -86,6 +86,7 @@ func StartShift(c *gin.Context) {
 		StartTime:   now.UTC(),
 		Status:      "open",
 		InitialCash: payload.InitialCash,
+		ExpectedAmount: payload.InitialCash,
 		CreatedAt:   now.UTC(),
 		UpdatedAt:   now.UTC(),
 	}
@@ -100,6 +101,10 @@ func StartShift(c *gin.Context) {
 func CurrentShift(c *gin.Context) {
 	user := c.MustGet("auth_user").(models.User)
 
+	type resFormat struct {
+		models.Shift
+		ExpectedCash float64 `json:"expected_cash"`		
+	}
 	var shift models.Shift
 	storeID := *user.StoreID
 
@@ -108,8 +113,13 @@ func CurrentShift(c *gin.Context) {
 		return
 	}
 
+	result := resFormat{
+		Shift: shift,
+		ExpectedCash: shift.InitialCash + shift.TotalCash,
+	}
+
 	shift.ToLocal(user.Store.Timezone)
-	c.JSON(http.StatusOK, response.Success("Current shift", shift))
+	c.JSON(http.StatusOK, response.Success("Current shift", result))
 }
 func EndShift(c *gin.Context) {
 	user := c.MustGet("auth_user").(models.User)
@@ -165,20 +175,28 @@ func EndShift(c *gin.Context) {
 		return
 	}
 	
-	expectedCash, err := helpers.RecalculateShiftExpectedCash(config.DB, storeID, shift.ID)
+	summary, err := helpers.RecalculateTransactionShift(config.DB, storeID, shift.ID)
 	if err != nil {
 		helpers.ErrorResponse(c, 422, "Recalculate expected cash gagal", err)
 		return
 	}
 
-	expectedCash = shift.InitialCash + expectedCash
-	diff := payload.ActualCash - expectedCash
+	ExpectedAmount := shift.InitialCash + summary["total_amount"]
+	ExpectedCash := summary["cash"] + shift.InitialCash
+	diff := payload.ActualCash - (ExpectedCash)
 
 	updates := map[string]interface{}{
 		"end_time":   now.UTC(),
 		"status":     "closed",
+
+		"total_cash": summary["cash"],
+		"total_transfer": summary["transfer"],
+		"total_qris": summary["qris"],
+		"total_tax": summary["tax_amount"],
+
+		"subtotal": summary["subtotal"],
+		"expected_amount": ExpectedAmount,
 		"actual_cash": payload.ActualCash,
-		"expected_cash": expectedCash,
 		"difference": diff,
 		"closed_by":  uint64(user.ID),
 		"note":  payload.Note,

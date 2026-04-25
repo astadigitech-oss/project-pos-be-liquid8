@@ -101,7 +101,7 @@ func AddToCart(c *gin.Context) {
     }
 
     // update product status
-    if err := tx.Model(&product).Updates(map[string]interface{}{"status": "sale"}).Error; err != nil {
+    if err := tx.Model(&product).Update("status", "sale").Error; err != nil {
         tx.Rollback()
         helpers.ErrorResponse(c, 500, "Failed to update product", err)
         return
@@ -646,6 +646,7 @@ func CheckoutTransaction(c *gin.Context) {
         Price    float64 `json:"price"`
     }
     var txRow []txRowModel
+    var productIDs []uint64
     // migrate items
     for _, it := range items {
         ti := models.TransactionItem{
@@ -659,6 +660,7 @@ func CheckoutTransaction(c *gin.Context) {
             Subtotal: it.Subtotal,
         }
 
+        productIDs = append(productIDs, it.ProductID)
         txRow = append(txRow, txRowModel{
             Name:     it.ProductName,
             Price:    it.Price,
@@ -684,6 +686,7 @@ func CheckoutTransaction(c *gin.Context) {
 	}
     // update transaction totals
     if err := tx.Model(&tr).Updates(map[string]interface{}{
+        "tax_price": ppnAmount,
         "total_quantity": totalQty,
 		"total_amount": totalAmount,
 		"change_amount": changeAmount,
@@ -700,6 +703,45 @@ func CheckoutTransaction(c *gin.Context) {
         helpers.ErrorResponse(c, 500, "Failed to clear cart", err)
         return
     }
+
+    //update product to sale
+    if len(productIDs) > 0 {
+        if err := tx.Model(&models.Product{}).
+            Where("id IN ?", productIDs).
+            Update("status", "sale").Error; err != nil {
+
+            tx.Rollback()
+            helpers.ErrorResponse(c, 500, "Failed to update status product", err)
+            return
+        }
+    }
+
+    // INCREMENTAL SHIFT UPDATE
+    var cash, transfer, qris float64
+	switch p.PaymentMethod {
+	case "cash":
+		cash = totalAmount
+	case "transfer":
+		transfer = totalAmount
+	case "qris":
+		qris = totalAmount
+	}
+
+	if err := tx.Model(&models.Shift{}).
+		Where("id = ?", shift.ID).
+		Updates(map[string]interface{}{
+			"total_cash":     gorm.Expr("total_cash + ?", cash),
+			"total_transfer": gorm.Expr("total_transfer + ?", transfer),
+			"total_qris":     gorm.Expr("total_qris + ?", qris),
+			"total_tax":      gorm.Expr("total_tax + ?", ppnAmount),
+			"subtotal":       gorm.Expr("subtotal + ?", subTotal),
+			"expected_amount": gorm.Expr("expected_amount + ?", totalAmount),
+		}).Error; err != nil {
+
+		tx.Rollback()
+		helpers.ErrorResponse(c, 500, "Update shift gagal", err)
+		return
+	}
 
     if err := tx.Commit().Error; err != nil {
         helpers.ErrorResponse(c, 500, "Commit failed", err)
@@ -900,7 +942,7 @@ func DetailTransaction(c *gin.Context) {
     result.Store.Address = tx.Store.Address
     
     result.Ppn.Tax = tx.Tax
-    result.Ppn.Amount = math.Round(tx.Subtotal * tx.Tax / 100)
+    result.Ppn.Amount = tx.TaxPrice
 
     // ambil items
     var items []transactionItemResponse
@@ -958,20 +1000,22 @@ func DetailTransactionsShift(c *gin.Context) {
     shift.ToLocal(user.Store.Timezone)
 
     var summary struct {
-        TotalInvoice int64 `json:"total_invoice"`
-        TotalSubtotal float64 `json:"total_subtotal"`
-        TotalTax float64 `json:"total_tax"`
-        TotalAmount float64 `json:"total_amount"`
+        TotalInvoice int64
+        TotalAmount float64
+        CashCancelled float64
+		TransferCancelled float64
+		QrisCancelled float64
     }
 
     summarySQL := `
         SELECT 
             COUNT(*) as total_invoice,
-            COALESCE(SUM(t.subtotal), 0) as total_subtotal,
-            COALESCE(SUM(t.subtotal * t.tax / 100), 0) as total_tax,
-            COALESCE(SUM(t.total_amount), 0) as total_amount
+            COALESCE(SUM(CASE WHEN status = 'done' THEN total_amount ELSE 0 END),0) AS total_amount,
+            COALESCE(SUM(CASE WHEN payment_method = 'cash' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS cash_cancelled,
+			COALESCE(SUM(CASE WHEN payment_method = 'transfer' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS transfer_cancelled,
+			COALESCE(SUM(CASE WHEN payment_method = 'qris' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS qris_cancelled
         FROM transactions t
-        WHERE t.shift_id = ? AND t.status = 'done'
+        WHERE t.shift_id = ?
     `
 
     if err := config.DB.Raw(summarySQL, shiftID).Scan(&summary).Error; err != nil {
@@ -997,15 +1041,27 @@ func DetailTransactionsShift(c *gin.Context) {
         End             *time.Time `json:"end"` // pointer kalau bisa null
         UserOpen        string     `json:"user_open"`
         UserClosed      string    `json:"user_closed"` // pointer kalau bisa null
+        
         InitialCash     float64    `json:"initial_cash"`
+        TotalInvoice    int64      `json:"total_invoice"`
+        
+        TotalCash       float64     `json:"total_cash"`
+        TotalTransfer       float64     `json:"total_transfer"`
+        TotalQris       float64     `json:"total_qris"`
+        TotalCashCancel       float64     `json:"total_cash_cancel"`
+        TotalTransferCancel       float64     `json:"total_transfer_cancel"`
+        TotalQrisCancel       float64     `json:"total_qris_cancel"`
+        
+        TotalTax        float64    `json:"total_tax"`
+        TotalSubtotal   float64    `json:"total_subtotal"`
+        TotalPenjualan  float64    `json:"total_penjualan"`
         ExpectedCash    float64    `json:"expected_cash"`
+        ExpectedAmount    float64    `json:"expected_amount"`
         ActualCash      float64    `json:"actual_cash"`
+        ActualAmount      float64    `json:"actual_amount"`
         Difference      float64    `json:"difference"`
         Note            *string    `json:"note"` // optional
-        TotalInvoice    int64      `json:"total_invoice"`
-        TotalSubtotal   float64    `json:"total_subtotal"`
-        TotalTax        float64    `json:"total_tax"`
-        TotalPenjualan  float64    `json:"total_penjualan"`
+        
         Store struct {
             Name  string  `json:"name"`
             Phone string `json:"phone"`
@@ -1076,15 +1132,27 @@ func DetailTransactionsShift(c *gin.Context) {
     result.End = shift.EndTime
     result.UserOpen = shift.UserOpen.Name
     result.UserClosed = user_closed
+
     result.InitialCash = shift.InitialCash
-    result.ExpectedCash = shift.ExpectedCash
+    result.TotalInvoice = summary.TotalInvoice
+    
+    result.TotalCash = shift.TotalCash
+    result.TotalTransfer = shift.TotalTransfer
+    result.TotalQris = shift.TotalQris
+    result.TotalCashCancel = summary.CashCancelled
+    result.TotalTransferCancel = summary.TransferCancelled
+    result.TotalQrisCancel = summary.QrisCancelled
+    
+    result.TotalTax = shift.TotalTax
+    result.TotalSubtotal = shift.Subtotal
+    result.TotalPenjualan = summary.TotalAmount
+    result.ExpectedCash = shift.TotalCash + shift.InitialCash
+    result.ExpectedAmount = shift.ExpectedAmount
     result.ActualCash = shift.ActualCash
+    result.ActualAmount = shift.ExpectedAmount - shift.Difference
     result.Difference = shift.Difference
     result.Note = shift.Note
-    result.TotalInvoice = summary.TotalInvoice
-    result.TotalSubtotal = summary.TotalSubtotal
-    result.TotalTax = math.Round(summary.TotalTax)
-    result.TotalPenjualan = math.Round(summary.TotalAmount)
+    
     result.Store.Name = shift.Store.StoreName
     result.Store.Phone = shift.Store.Phone
     result.Store.Address = shift.Store.Address
@@ -1138,6 +1206,33 @@ func CancelTransaction(c *gin.Context) {
             return 
         }
     }
+
+    // INCREMENTAL SHIFT UPDATE
+    var cash, transfer, qris float64
+	switch tr.PaymentMethod {
+	case "cash":
+		cash = tr.TotalAmount
+	case "transfer":
+		transfer = tr.TotalAmount
+	case "qris":
+		qris = tr.TotalAmount
+	}
+
+	if err := dbTx.Model(&models.Shift{}).
+		Where("id = ?", shift.ID).
+		Updates(map[string]interface{}{
+			"total_cash":     gorm.Expr("total_cash - ?", cash),
+			"total_transfer": gorm.Expr("total_transfer - ?", transfer),
+			"total_qris":     gorm.Expr("total_qris - ?", qris),
+			"total_tax":      gorm.Expr("total_tax - ?", tr.TaxPrice),
+			"subtotal":       gorm.Expr("subtotal - ?", tr.Subtotal),
+			"expected_amount": gorm.Expr("expected_amount - ?", tr.TotalAmount),
+		}).Error; err != nil {
+
+		dbTx.Rollback()
+		helpers.ErrorResponse(c, 500, "Update shift gagal", err)
+		return
+	}
 
     if err := dbTx.Commit().Error; err != nil { 
         helpers.ErrorResponse(c, 500, "Commit failed", err); 

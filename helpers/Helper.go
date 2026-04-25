@@ -424,19 +424,44 @@ func MergeStyles(styles ...excelize.Style) *excelize.Style {
 }
 
 //=================== Transaction ========================
-func RecalculateShiftExpectedCash(db *gorm.DB, storeID uint64, shiftID uint64) (float64, error) {
-	var total float64
-	query := db.Model(&models.Transaction{}).
-		Select("COALESCE(SUM(total_amount),0)").
-		Where("status = ?", "done").
-		Where("shift_id = ?", shiftID).
-		Where("store_id = ?", storeID)
-
-	if err := query.Scan(&total).Error; err != nil {
-		return 0, err
+func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (map[string]float64, error) {
+	type result struct {
+		Subtotal   float64
+		TotalAmount float64  //total subtotal + pajak
+		TaxAmount  float64	 //total pajak
+		Cash       float64
+		Transfer   float64
+		Qris       float64
 	}
 
-	return total, nil
+	var res result
+
+	err := db.Model(&models.Transaction{}).
+		Select(`
+			COALESCE(SUM(subtotal), 0) AS subtotal,
+			COALESCE(SUM(total_amount), 0) AS total_amount,
+			COALESCE(SUM(tax_price), 0) AS tax_amount,
+			COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total_amount ELSE 0 END),0) AS cash,
+			COALESCE(SUM(CASE WHEN payment_method = 'transfer' THEN total_amount ELSE 0 END),0) AS transfer,
+			COALESCE(SUM(CASE WHEN payment_method = 'qris' THEN total_amount ELSE 0 END),0) AS qris
+		`).
+		Where("status = ?", "done").
+		Where("shift_id = ?", shiftID).
+		Where("store_id = ?", storeID).
+		Scan(&res).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]float64{
+		"subtotal":   res.Subtotal,
+		"total_amount": res.TotalAmount,
+		"tax_amount":  res.TaxAmount,
+		"cash":     res.Cash,
+		"transfer": res.Transfer,
+		"qris":     res.Qris,
+	}, nil
 }
 func GeneratePendingKeepCode(db *gorm.DB, storeID uint64) (string, error) {
 	// MySQL: substring start index is 1-based. Prefix 'KSRPEND' length = 7, numeric part starts at 8
