@@ -49,6 +49,7 @@ var Tables = []interface{}{
 	&models.TransactionItem{},
 	&models.CartItem{},
 	&models.Ppn{},
+	&models.AppRelease{},
 }
 
 func runMigrations() {

@@ -188,3 +188,30 @@ func OAuthCheck() gin.HandlerFunc {
 		c.Next()
 	}
 }
+func StaticAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+
+		if authHeader == "" {
+			helpers.ErrorResponse(c, http.StatusUnauthorized, "Missing Authorization header", nil)
+			c.Abort()
+			return
+		}
+
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			helpers.ErrorResponse(c, http.StatusUnauthorized, "Invalid Authorization format", nil)
+			return
+		}
+
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+		// cek secret_key
+		if tokenString != os.Getenv("TOKEN_APP_RELEASE") {
+			helpers.ErrorResponse(c, http.StatusUnauthorized, "Invalid token secret key", nil)
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}

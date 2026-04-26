@@ -150,6 +150,9 @@ func RouteHandler(r *gin.Engine) {
 	}
 
 	// wms service integration
+	api.GET("app-release/:target", controllers.CheckUpdate) // VersionController.go
+	api.GET("installer/:target/file/:file", controllers.DownloadInstaller) // VersionController.go
+	api.GET("update/:target/file/:file", controllers.DownloadUpdater) // VersionController.go
 	wmsService := api.Group("")
 	wmsService.Use(middleware.OAuthCheck())
 	{
@@ -159,5 +162,12 @@ func RouteHandler(r *gin.Engine) {
 		wmsService.GET("destination-stores/sync", controllers.ListStoresForSync) //StoreController.go
 		wmsService.POST("products/store", controllers.ReceiveMigrateDocument) //ProductController.go
 		wmsService.DELETE("products-bkl", controllers.DeleteProdukBKL) //ProductController.go
+	}
+
+	// //version handler
+	versionService := api.Group("")
+	versionService.Use(middleware.StaticAuth())
+	{
+		versionService.POST("app-release", controllers.UploadRelease) //VersionController.go
 	}
 }
