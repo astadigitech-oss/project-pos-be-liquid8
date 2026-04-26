@@ -13,14 +13,25 @@ import (
 
 func GetDashboardData(c *gin.Context) {
 	//total sale per hari
+	now, err := helpers.GetCurentTime("Asia/Jakarta")
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	end := start.Add(24*time.Hour - time.Nanosecond)
+	// convert ke UTC
+	startUTC := start.UTC()
+	endUTC := end.UTC()
+
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal mengambil current time", err)
+		return
+	}
 	var totalSales float64
 	if err := config.DB.Raw(`
 		SELECT 
 			COALESCE(SUM(total_amount), 0) as total_sales
 		FROM transactions
 		WHERE status = 'done'
-		AND transaction_date = CURDATE()
-	`).Scan(&totalSales).Error; err != nil {
+		AND created_at BETWEEN ? AND ?
+	`, startUTC, endUTC).Scan(&totalSales).Error; err != nil {
 		helpers.ErrorResponse(c, 500, "Failed to fetch today sales", err)
 		return
 	}
@@ -66,7 +77,6 @@ func GetDashboardData(c *gin.Context) {
 	// recent transactions (limit 50)
 	type txRow struct {
 		ID              uint64    `json:"id"`
-		TransactionDate string    `json:"transaction_date"`
 		Invoice         string    `json:"invoice"`
 		StoreName       string    `json:"store_name"`
 		TotalAmount     float64   `json:"total_amount"`
@@ -82,16 +92,19 @@ func GetDashboardData(c *gin.Context) {
 			t.invoice,
 			t.total_amount,
 			t.status,
-			t.transaction_date,
 			t.created_at,
 			s.store_name as store_name
 		FROM transactions t
 		JOIN store_profiles s ON s.id = t.store_id
 		ORDER BY t.created_at DESC
-		LIMIT 30
+		LIMIT 20
 	`).Scan(&recentTx).Error; err != nil {
 		helpers.ErrorResponse(c, 500, "Failed to fetch recent transactions", err)
 		return
+	}
+
+	for i := 0; i < len(recentTx); i++ {
+		recentTx[i].CreatedAt = helpers.ToLocalTime(recentTx[i].CreatedAt, "Asia/Jakarta")
 	}
 
 	resp := gin.H{
