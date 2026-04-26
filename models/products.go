@@ -1,8 +1,10 @@
 package models
 
 import (
-	"time"
 	"fmt"
+	"time"
+
+	"gorm.io/gorm"
 )
 
 type Product struct {
@@ -26,6 +28,7 @@ type Product struct {
 	
 	CreatedAt     		time.Time   `json:"created_at"`
 	UpdatedAt     		time.Time   `json:"updated_at"`
+	DeletedAt 			gorm.DeletedAt `gorm:"index"`
 
 	//relations
 	Store		*StoreProfile `gorm:"foreignKey:StoreID;references:ID;constraint:OnDelete:CASCADE" json:"store,omitempty"`

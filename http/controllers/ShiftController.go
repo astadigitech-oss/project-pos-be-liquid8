@@ -74,7 +74,6 @@ func StartShift(c *gin.Context) {
 	}
 
 	// prepare shift
-	fmt.Println(user)
 	now, err := helpers.GetCurentTime(user.Store.Timezone)
 	if err != nil {
 		helpers.ErrorResponse(c, 500, "Gagal mendapatkan waktu sekarang", err)

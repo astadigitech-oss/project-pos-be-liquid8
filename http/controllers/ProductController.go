@@ -14,6 +14,8 @@ import (
 	"liquid8/pos/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ListProducts returns paginated products filtered by q (search name or barcode)
@@ -127,11 +129,11 @@ func ListProductsOfStore(c *gin.Context) {
 
     var rows []productRow
 
-    baseWhere := fmt.Sprintf("WHERE p.status = 'display' AND p.store_id = %d ", *user.StoreID)
+    baseWhere := fmt.Sprintf("WHERE p.status = 'display' AND p.store_id = %d AND deleted_at IS NULL", *user.StoreID)
     args := []interface{}{}
     if q != "" {
         like := "%" + q + "%"
-        baseWhere += "AND (p.name LIKE ? OR p.barcode LIKE ? OR s.store_name LIKE ?)"
+        baseWhere += " AND (p.name LIKE ? OR p.barcode LIKE ? OR s.store_name LIKE ?)"
         args = append(args, like, like, like)
     }
 
@@ -212,6 +214,16 @@ func ReceiveMigrateDocument(c *gin.Context) {
         return
     }
 
+    defer func() {
+        if r := recover(); r != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{
+                "status":  false,
+                "message": "Terjadi kesalahan internal",
+                "error":   fmt.Sprintf("%v", r),
+            })
+        }
+    }()
+
     // check if store token is valid
     var store models.StoreProfile
     if err := config.DB.Where("token = ?", payload.StoreToken).First(&store).Error; err != nil {
@@ -233,8 +245,68 @@ func ReceiveMigrateDocument(c *gin.Context) {
         helpers.ErrorResponse(c, 400, fmt.Sprintf("Migrate document dengan code %s sebelumnya sudah berhasil dimasukan", payload.DocumentCode), nil)
         return
     }
+    // =========================
+	// CEK DATA BARCODE DI SISTEM
+	// =========================
+    type conflictResult struct {
+        Barcode string
+        Status  string
+        DeletedAt *time.Time
+    }
+	barcodes := make([]string, 0, len(payload.Products))
+	for _, p := range payload.Products {
+		barcodes = append(barcodes, p.Barcode)
+	}
+    //search barcode per chunk
+    chunkBarcodes := chunkStrings(barcodes, 500)
+    var conflicts []conflictResult
 
-    // start transaction
+	for _, chunk := range chunkBarcodes {
+        var temp []conflictResult
+        err := config.DB.
+            Model(&models.Product{}).
+            Select("barcode, status, deleted_at").
+            Where("store_id = ?", store.ID).
+            Where("barcode IN ?", chunk).
+            Where(`
+                status = 'sale' 
+                OR (deleted_at IS NULL AND status = 'display')
+            `).
+            Scan(&temp).Error
+
+        if err != nil {
+            helpers.ErrorResponse(c, 500, "failed check conflict", err)
+            return
+        }
+
+        conflicts = append(conflicts, temp...)
+    }
+    
+    //Pisah produk yang status sale dan masih aktif
+	var soldBarcodes []string
+    var activeBarcodes []string
+    for _, c := range conflicts {
+        if c.Status == "sale" {
+            soldBarcodes = append(soldBarcodes, c.Barcode)
+        } else if c.Status == "display" && c.DeletedAt == nil {
+            activeBarcodes = append(activeBarcodes, c.Barcode)
+        }
+    }
+
+    //jika ada product aktif atau sudah sale → STOP
+    if len(soldBarcodes) > 0 || len(activeBarcodes) > 0 {
+        c.JSON(400, gin.H{
+            "status":          false,
+            "message":         "Terdapat produk yang tidak bisa diproses",
+            "sold_barcodes":   soldBarcodes,
+            "active_barcodes": activeBarcodes,
+        })
+        return
+    }
+
+    // ====================
+    // PROSES DATA PRODUK
+    // ====================
     tx := config.DB.WithContext(c.Request.Context()).Begin()
     if tx.Error != nil {
         helpers.ErrorResponse(c, 500, "failed to start transaction", tx.Error)
@@ -256,7 +328,7 @@ func ReceiveMigrateDocument(c *gin.Context) {
         return
     }
 
-    // insert products
+    // Batch uptsert data product
     totalQuantity := int64(0)
     totalPrice := float64(0)
     batchSize := 100
@@ -287,9 +359,29 @@ func ReceiveMigrateDocument(c *gin.Context) {
         })
 
         if len(batch) == batchSize || i == len(payload.Products)-1 {
-            if err := tx.CreateInBatches(batch, batchSize).Error; err != nil {
+            if err := tx.Clauses(clause.OnConflict{
+                Columns: []clause.Column{
+                    {Name: "barcode"},
+                },
+                DoUpdates: clause.Assignments(map[string]interface{}{
+                    "migrate_id":       gorm.Expr("VALUES(migrate_id)"),
+                    "code_document":    gorm.Expr("VALUES(code_document)"),
+                    "old_barcode":      gorm.Expr("VALUES(old_barcode)"),
+                    "old_price":        gorm.Expr("VALUES(old_price)"),
+                    "actual_price":     gorm.Expr("VALUES(actual_price)"),
+                    "name":             gorm.Expr("VALUES(name)"),
+                    "price":            gorm.Expr("VALUES(price)"),
+                    "quantity":         gorm.Expr("VALUES(quantity)"),
+                    "status":           "display",
+                    "tag_color":        gorm.Expr("VALUES(tag_color)"),
+                    "is_so":            gorm.Expr("VALUES(is_so)"),
+                    "is_extra_product": gorm.Expr("VALUES(is_extra_product)"),
+                    "user_so":          gorm.Expr("VALUES(user_so)"),
+                    "deleted_at": nil,
+                }),
+            }).Create(&batch).Error; err != nil {
                 tx.Rollback()
-                helpers.ErrorResponse(c, 500, "failed to insert product", err)
+                helpers.ErrorResponse(c, 500, "failed upsert product", err)
                 return
             }
             batch = nil // reset
@@ -407,37 +499,20 @@ func DeleteProdukBKL(c *gin.Context) {
     // =========================
     // CHECK FK USAGE
     // =========================
-    usedMap := make(map[uint64]struct{})
+    // usedMap := make(map[uint64]struct{})
+    // var trxUsed []uint64
+    // if err := tx.Model(&models.TransactionItem{}).
+    //     Where("product_id IN ?", productIDs).
+    //     Pluck("DISTINCT product_id", &trxUsed).Error; err != nil {
 
-    // cek cart_items
-    var cartUsed []uint64
-    if err := tx.Model(&models.CartItem{}).
-        Where("product_id IN ?", productIDs).
-        Pluck("DISTINCT product_id", &cartUsed).Error; err != nil {
+    //     tx.Rollback()
+    //     helpers.ErrorResponse(c, 500, "failed check transaction items", err)
+    //     return
+    // }
 
-        tx.Rollback()
-        helpers.ErrorResponse(c, 500, "failed check cart items", err)
-        return
-    }
-
-    for _, id := range cartUsed {
-        usedMap[id] = struct{}{}
-    }
-
-    // cek transaction_items
-    var trxUsed []uint64
-    if err := tx.Model(&models.TransactionItem{}).
-        Where("product_id IN ?", productIDs).
-        Pluck("DISTINCT product_id", &trxUsed).Error; err != nil {
-
-        tx.Rollback()
-        helpers.ErrorResponse(c, 500, "failed check transaction items", err)
-        return
-    }
-
-    for _, id := range trxUsed {
-        usedMap[id] = struct{}{}
-    }
+    // for _, id := range trxUsed {
+    //     usedMap[id] = struct{}{}
+    // }
 
     // =========================
     // SPLIT DATA
@@ -446,7 +521,7 @@ func DeleteProdukBKL(c *gin.Context) {
         deletableIDs []uint64
         missing      []string
         skippedSale  []string
-        skippedUsed  []string
+        // skippedUsed  []string
     )
 
     for _, b := range payload.ProductBarcode {
@@ -462,10 +537,10 @@ func DeleteProdukBKL(c *gin.Context) {
             continue
         }
 
-        if _, used := usedMap[p.ID]; used {
-            skippedUsed = append(skippedUsed, b)
-            continue
-        }
+        // if _, used := usedMap[p.ID]; used {
+        //     skippedUsed = append(skippedUsed, b)
+        //     continue
+        // }
 
         deletableIDs = append(deletableIDs, p.ID)
     }
@@ -512,13 +587,27 @@ func DeleteProdukBKL(c *gin.Context) {
         "deleted_count":   deletedCount,
 
         "skipped_sale_count": len(skippedSale),
-        "skipped_used_count": len(skippedUsed),
+        // "skipped_used_count": len(skippedUsed),
         "missing_count":      len(missing),
 
         "skipped_sale": skippedSale,
-        "skipped_used": skippedUsed,
+        // "skipped_used": skippedUsed,
         "missing":      missing,
     }
 
     c.JSON(http.StatusOK, response.Success("Produk BKL berhasil diproses", data))
+}
+
+//====================== helper ======================
+
+func chunkStrings(data []string, size int) [][]string {
+	var chunks [][]string
+	for i := 0; i < len(data); i += size {
+		end := i + size
+		if end > len(data) {
+			end = len(data)
+		}
+		chunks = append(chunks, data[i:end])
+	}
+	return chunks
 }
