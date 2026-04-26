@@ -118,6 +118,7 @@ func ListProductsOfStore(c *gin.Context) {
     type productRow struct {
         ID uint64 `json:"id"`
         StoreID uint64 `json:"store_id"`
+        OldBarcode string `json:"old_barcode"`
         Barcode string `json:"barcode"`
         Name string `json:"name"`
         Price float64 `json:"price"`
@@ -133,7 +134,7 @@ func ListProductsOfStore(c *gin.Context) {
     args := []interface{}{}
     if q != "" {
         like := "%" + q + "%"
-        baseWhere += " AND (p.name LIKE ? OR p.barcode LIKE ? OR s.store_name LIKE ?)"
+        baseWhere += " AND (p.name LIKE ? OR p.barcode LIKE ? OR p.old_barcode LIKE ? OR s.store_name LIKE ?)"
         args = append(args, like, like, like)
     }
 
