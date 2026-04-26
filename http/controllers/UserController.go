@@ -31,16 +31,31 @@ func GetUsers(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
-	var users []models.User
+	type formatRes struct {
+		ID uint64 `json:"id"`
+		Name string `json:"name"`
+		Username string `json:"username"`
+		Email	string `json:"email"`
+		StoreName string `json:"store_name"`
+	} 
+
+	var users []formatRes
 	var totalData int64
 
 	//inisialisasi query
-	query := config.DB.Model(&models.User{}).Where("role NOT IN ?", []string{"superadmin", "admin"})
+	query := config.DB.Table("users u").Select(`
+		u.name,
+		u.username,
+		u.email,
+		s.store_name
+	`).
+	Joins("LEFT JOIN store_profiles s ON s.id = u.store_id").
+	Where("role NOT IN ?", []string{"superadmin", "admin"})
 
 	// Searching (misalnya, mencari berdasarkan nama atau email)
 	if q != "" {
 		searchPattern := "%" + q + "%"
-		query = query.Where("(name LIKE ? OR email LIKE ?)", searchPattern, searchPattern)
+		query = query.Where("(u.name LIKE ? OR u.email LIKE ? OR s.store_name LIKE ?)", searchPattern, searchPattern, searchPattern)
 	}
 
 	// Menghitung total data yang sesuai dengan filter/search sebelum diterapkan limit/offset
@@ -52,7 +67,7 @@ func GetUsers(c *gin.Context) {
 	err := query.
 		Limit(limit).
 		Offset(offset).
-		Order("created_at desc"). // Sorting data terbaru di atas
+		Order("u.created_at desc"). // Sorting data terbaru di atas
 		Find(&users).Error
 
 	if err != nil {
@@ -80,7 +95,7 @@ func DetailUser(c *gin.Context) {
 	userID := c.Param("id")
 
 	var user models.User
-	if err := config.DB.Preload("Role").First(&user, userID).Error; err != nil {
+	if err := config.DB.Preload("Store").First(&user, userID).Error; err != nil {
 		helpers.ErrorResponse(c, http.StatusNotFound, "User tidak ditemukan", err)
 		return
 	}
@@ -315,21 +330,28 @@ func UpdateUser(c *gin.Context) {
 	}
 
 	// =========================
-	// CEK EMAIL UNIK (KECUALI DIRI SENDIRI)
+	// CEK EMAIL DAN USERNAME UNIK (KECUALI DIRI SENDIRI)
 	// =========================
-	var count int64
+	var userOther models.User
 	if err := config.DB.
 		Model(&models.User{}).
-		Where("email = ? AND id != ?", req.Email, userID).
-		Count(&count).Error; err != nil {
+		Where("(email = ? OR username = ?) AND id != ?", req.Email, req.Username, user.ID).
+		First(&userOther).Error; err != nil {
 
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal memeriksa email", err)
 		return
 	}
-	if count > 0 {
+
+	if userOther.Email == req.Email {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"status":  false,
 			"message": "Email sudah digunakan",
+		})
+		return
+	}else if userOther.Username == req.Username {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  false,
+			"message": "Username sudah digunakan",
 		})
 		return
 	}
@@ -422,7 +444,7 @@ func UpdateProfile(c *gin.Context) {
 	var userOther models.User
 	if err := config.DB.
 		Model(&models.User{}).
-		Where("email = ? AND username = ? AND id != ?", req.Email, req.Username, user.ID).
+		Where("(email = ? OR username = ?) AND id != ?", req.Email, req.Username, user.ID).
 		First(&userOther).Error; err != nil {
 
 		helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal memeriksa email", err)
