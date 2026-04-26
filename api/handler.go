@@ -84,6 +84,7 @@ func RouteHandler(r *gin.Engine) {
 		protected.GET("members", controllers.ListAllMembers) //MemberController.go
 		protected.GET("members/:id", controllers.DetailMember) //MemberController.go
 		protected.POST("members", controllers.CreateMember) //MemberController.go
+		protected.POST("admin/members", middleware.RoleCheck([]string{"superadmin","admin"}), controllers.AdminCreateMember) //MemberController.go
 		protected.PUT("members/:id", controllers.UpdateMember) //MemberController.go
 		protected.DELETE("members/:id", controllers.DeleteMember) //MemberController.go
 		//========================================

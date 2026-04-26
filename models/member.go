@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type Member struct {
 	ID              uint       `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -11,6 +15,7 @@ type Member struct {
 	
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+	DeletedAt 			gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// relations
 	Store *StoreProfile `gorm:"foreignKey:StoreID;references:ID;constraint:OnDelete:CASCADE" json:"store,omitempty"`

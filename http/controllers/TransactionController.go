@@ -71,7 +71,7 @@ func AddToCart(c *gin.Context) {
 
     // load product
     var product models.Product
-    if err := config.DB.Where("barcode = ? AND store_id = ?", p.ProductBarcode, storeID).First(&product).Error; err != nil {
+    if err := config.DB.Where("barcode = ? AND store_id = ? AND deleted_at IS NULL", p.ProductBarcode, storeID).First(&product).Error; err != nil {
         helpers.ErrorResponse(c, 404, "Product tidak ditemukan", err)
         return
     }
