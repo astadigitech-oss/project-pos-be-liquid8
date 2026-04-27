@@ -750,6 +750,7 @@ func CheckoutTransaction(c *gin.Context) {
 
     c.JSON(http.StatusOK, response.Success("Transaction saved", gin.H{
         "id": tr.ID,
+        "shift_id": shift.ID,
         "invoice": invoice,
         "kasir": user.Name,
         "customer_name": member.Name,
