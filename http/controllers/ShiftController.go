@@ -241,7 +241,11 @@ func GetShiftsByCashier(c *gin.Context) {
 		EndTime      *time.Time `json:"end_time"`
 		Status       string    `json:"status"`
 		InitialCash  float64   `json:"initial_cash"`
-		ExpectedCash float64   `json:"expected_cash"`
+		TotalCash	float64		`json:"total_cash"`
+		TotalTransfer	float64		`json:"total_transfer"`
+		TotalQris	float64		`json:"total_qris"`
+		ExpectedCash	float64 	`json:"expected_cash"`
+		ExpectedAmount float64   `json:"expected_amount"`
 		ActualCash   float64   `json:"actual_cash"`
 		Difference   float64   `json:"difference"`
 		StoreName    string    `json:"store_name"`
@@ -327,7 +331,11 @@ func GetShiftsByCashier(c *gin.Context) {
 		shifts.end_time,
 		shifts.status,
 		shifts.initial_cash,
-		shifts.expected_cash,
+		shifts.total_cash,
+		shifts.total_transfer,
+		shifts.total_qris,
+		COALESCE(shifts.total_cash + shifts.initial_cash, 0) as expected_cash,
+		shifts.expected_amount,
 		shifts.actual_cash,
 		shifts.difference,
 		COALESCE(s.store_name, '') as store_name,
