@@ -424,6 +424,20 @@ func MergeStyles(styles ...excelize.Style) *excelize.Style {
 }
 
 //=================== Transaction ========================
+func RoundTo500(n int) float64 {
+	remainder := n % 1000
+
+	if remainder == 0 {
+		return float64(n)
+	}
+
+	if remainder <= 500 {
+		return float64((n - remainder) + 500)
+	}
+
+	return float64((n - remainder) + 1000)
+}
+
 func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (map[string]float64, error) {
 	type result struct {
 		Subtotal   float64

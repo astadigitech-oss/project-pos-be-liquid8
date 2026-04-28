@@ -16,8 +16,9 @@ type Transaction struct {
 	Subtotal     float64 `json:"subtotal" gorm:"type:decimal(18,2);default:0"`
 	Tax          float64 `json:"tax" gorm:"type:decimal(18,2);default:0"`
 	TaxPrice	 float64 `json:"tax_price" gorm:"type:decimal(18,2);default:0"`
+	RoundedPrice  float64 `json:"rounded_price" gorm:"type:decimal(18,2);default:0"` //total hasil pembulatan
 	Discount     float64 `json:"discount" gorm:"type:decimal(18,2);default:0"`
-	TotalAmount  float64 `json:"total_amount" gorm:"type:decimal(18,2);default:0"`
+	TotalAmount  float64 `json:"total_amount" gorm:"type:decimal(18,2);default:0"` //subtotal + pajak
 	PaidAmount   float64 `json:"paid_amount" gorm:"type:decimal(18,2);default:0"`
 	ChangeAmount float64 `json:"change_amount" gorm:"type:decimal(18,2);default:0"`
 	PaymentMethod string `json:"payment_method" gorm:"type:enum('cash','transfer','qris')"`

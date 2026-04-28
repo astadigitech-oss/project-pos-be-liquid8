@@ -387,7 +387,7 @@ func GetCurrentCart(c *gin.Context) {
         return     
     }
 
-    var totalSubtotal float64
+    var totalSubtotal, totalAmount float64
     var totalQuantity int64
     for _, it := range items {
         totalSubtotal += it.Subtotal
@@ -395,6 +395,9 @@ func GetCurrentCart(c *gin.Context) {
     }
 
     ppn_price := math.Round(totalSubtotal * (ppn.Ppn / 100))
+    totalAmount = math.Round(totalSubtotal + ppn_price)
+    totalAmount = helpers.RoundTo500(int(totalAmount))
+
     payload := gin.H{
         "items": items,
         "subtotal": totalSubtotal,
@@ -402,7 +405,7 @@ func GetCurrentCart(c *gin.Context) {
             "tax": ppn.Ppn,
             "amount": ppn_price,
         },
-        "total_amount": math.Round(totalSubtotal + ppn_price),
+        "total_amount": totalAmount,
     }
 
     c.JSON(http.StatusOK, response.Success("Current cart", payload))
@@ -677,7 +680,9 @@ func CheckoutTransaction(c *gin.Context) {
     }
 
     ppnAmount := math.Round(subTotal * (ppn.Ppn / 100))
-	totalAmount := math.Round(subTotal + ppnAmount)
+	totalTransaction := math.Round(subTotal + ppnAmount)
+    totalAmount := helpers.RoundTo500(int(totalTransaction))
+    roundedPrice := totalAmount - totalTransaction
 	changeAmount := tr.PaidAmount - totalAmount
 	if changeAmount < 0 {
 		tx.Rollback()
@@ -687,6 +692,7 @@ func CheckoutTransaction(c *gin.Context) {
     // update transaction totals
     if err := tx.Model(&tr).Updates(map[string]interface{}{
         "tax_price": ppnAmount,
+        "rounded_price": roundedPrice,
         "total_quantity": totalQty,
 		"total_amount": totalAmount,
 		"change_amount": changeAmount,
@@ -760,6 +766,7 @@ func CheckoutTransaction(c *gin.Context) {
         "change_amount": tr.ChangeAmount,
         "payment_method": tr.PaymentMethod,
         "subtotal": tr.Subtotal,
+        "pembulatan": tr.RoundedPrice,
         "total_amount": tr.TotalAmount,
         "created_at": helpers.ToLocalTime(tr.CreatedAt, user.Store.Timezone),
         "store": gin.H{
@@ -899,6 +906,7 @@ func DetailTransaction(c *gin.Context) {
         ChangeAmount float64 `json:"change_amount"`
         PaymentMethod string  `json:"payment_method"`
         Subtotal  float64 `json:"subtotal"`
+        RoundedPrice  float64 `json:"pembulatan"`
         TotalAmount  float64 `json:"total_amount"`
         Status string `json:"status"`
         CreatedAt time.Time  `json:"created_at"`
@@ -917,7 +925,12 @@ func DetailTransaction(c *gin.Context) {
     }
 
     var tx models.Transaction
-    if err := config.DB.Preload("User").Preload("Member").Preload("Store").First(&tx, id).Error; err != nil {
+    if err := config.DB.
+        Preload("User").
+        Preload("Member", func(db *gorm.DB) *gorm.DB {
+            return db.Unscoped()
+        }).
+        Preload("Store").First(&tx, id).Error; err != nil {
         helpers.ErrorResponse(c, 404, "Transaction not found", err)
         return
     }
@@ -934,7 +947,8 @@ func DetailTransaction(c *gin.Context) {
     result.ChangeAmount = tx.ChangeAmount
     result.PaymentMethod = tx.PaymentMethod
     result.Subtotal = tx.Subtotal
-    result.TotalAmount = math.Round(tx.TotalAmount)
+    result.TotalAmount = tx.TotalAmount
+    result.RoundedPrice = tx.RoundedPrice
     result.Status = tx.Status
     result.CreatedAt = tx.CreatedAt
     
@@ -1002,6 +1016,7 @@ func DetailTransactionsShift(c *gin.Context) {
 
     var summary struct {
         TotalInvoice int64
+        TotalRounded float64
         TotalAmount float64
         CashCancelled float64
 		TransferCancelled float64
@@ -1011,6 +1026,7 @@ func DetailTransactionsShift(c *gin.Context) {
     summarySQL := `
         SELECT 
             COUNT(*) as total_invoice,
+            COALESCE(SUM(CASE WHEN status = 'done' THEN rounded_price ELSE 0 END),0) AS total_rounded,
             COALESCE(SUM(CASE WHEN status = 'done' THEN total_amount ELSE 0 END),0) AS total_amount,
             COALESCE(SUM(CASE WHEN payment_method = 'cash' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS cash_cancelled,
 			COALESCE(SUM(CASE WHEN payment_method = 'transfer' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS transfer_cancelled,
@@ -1055,7 +1071,8 @@ func DetailTransactionsShift(c *gin.Context) {
         
         TotalTax        float64    `json:"total_tax"`
         TotalSubtotal   float64    `json:"total_subtotal"`
-        TotalPenjualan  float64    `json:"total_penjualan"`
+        TotalAmount  float64    `json:"total_penjualan"`
+        TotalRounded  float64    `json:"pembulatan"`
         ExpectedCash    float64    `json:"expected_cash"`
         ExpectedAmount    float64    `json:"expected_amount"`
         ActualCash      float64    `json:"actual_cash"`
@@ -1146,7 +1163,8 @@ func DetailTransactionsShift(c *gin.Context) {
     
     result.TotalTax = shift.TotalTax
     result.TotalSubtotal = shift.Subtotal
-    result.TotalPenjualan = summary.TotalAmount
+    result.TotalAmount = summary.TotalAmount
+    result.TotalRounded = summary.TotalRounded
     result.ExpectedCash = shift.TotalCash + shift.InitialCash
     result.ExpectedAmount = shift.ExpectedAmount
     result.ActualCash = shift.ActualCash
