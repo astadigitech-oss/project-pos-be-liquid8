@@ -97,7 +97,7 @@ func GetDashboardData(c *gin.Context) {
 		FROM transactions t
 		JOIN store_profiles s ON s.id = t.store_id
 		ORDER BY t.created_at DESC
-		LIMIT 20
+		LIMIT 10
 	`).Scan(&recentTx).Error; err != nil {
 		helpers.ErrorResponse(c, 500, "Failed to fetch recent transactions", err)
 		return

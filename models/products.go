@@ -12,7 +12,7 @@ type Product struct {
 	StoreID  	  		uint64     `json:"store_id" gorm:"index;not null"`
 	MigrateID  	  		*uint64     `json:"migrte_id" gorm:"index"`
 	
-	CodeDocument  		*string     `gorm:"size:15" json:"code_document"`
+	CodeDocument  		*string     `gorm:"size:50" json:"code_document"`
 	OldBarcode		 	*string  	`gorm:"size:50" json:"old_barcode"`
 	OldPrice		  	float64		`gorm:"type:decimal(18,2);not null" json:"old_price"`
 	ActualPrice			float64		`gorm:"type:decimal(18,2);not null" json:"actual_price"`
