@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"liquid8/pos/config"
 	"liquid8/pos/helpers"
 
@@ -447,8 +448,10 @@ func UpdateProfile(c *gin.Context) {
 		Where("(email = ? OR username = ?) AND id != ?", req.Email, req.Username, user.ID).
 		First(&userOther).Error; err != nil {
 
-		helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal memeriksa email", err)
-		return
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal memeriksa email", err)
+			return
+		}
 	}
 
 	if userOther.Email == req.Email {
