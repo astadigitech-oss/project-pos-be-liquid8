@@ -14,30 +14,35 @@ import (
 	"liquid8/pos/models"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 // ListStores returns paginated store profiles
 func ListStores(c *gin.Context) {
 	q := strings.TrimSpace(c.DefaultQuery("q", ""))
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if page < 1 {
-		page = 1
-	}
-	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
-	offset := (page - 1) * limit
+	// page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	// if page < 1 {
+	// 	page = 1
+	// }
+	// limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
+	// offset := (page - 1) * limit
 
-	type Result struct {
-		models.StoreProfile
-		TotalProducts int64   `json:"total_products"`
-		TotalSales    float64 `json:"total_sales"`
+	type formatRes struct {
+		ID              uint       `json:"id"`
+		StoreName		string	   `json:"store_name"`
+		Phone        	string     `json:"phone"`
+		Address         string     `json:"address"`
+		TotalProduct	int64		`json:"total_product"`
+		TotalSales		float64		`json:"total_sales"`
 	}
 
-	var results []Result
+	var results []formatRes
 
 	db := config.DB.Model(&models.StoreProfile{}).
 		Select(`
-			store_profiles.*,
+			store_profiles.id,
+			store_profiles.store_name,
+			store_profiles.phone,
+			store_profiles.address,
 			COALESCE(p.total_products, 0) as total_products,
 			COALESCE(t.total_sales, 0) as total_sales
 		`).
@@ -60,29 +65,26 @@ func ListStores(c *gin.Context) {
 
 	if q != "" {
 		like := "%" + q + "%"
-		db = db.Where("store_name LIKE ? OR phone LIKE ? OR address LIKE ?", like, like, like)
+		db = db.Where("store_profiles.store_name LIKE ? OR store_profiles.phone LIKE ? OR store_profiles.address LIKE ?", like, like, like)
 	}
 
 	// count total
-	var total int64
-	if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-		helpers.ErrorResponse(c, 500, "failed to count stores", err)
-		return
-	}
+	// var total int64
+	// if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+	// 	helpers.ErrorResponse(c, 500, "failed to count stores", err)
+	// 	return
+	// }
 
 	// fetch data
-	if err := db.Limit(limit).Offset(offset).Find(&results).Error; err != nil {
+	if err := db.Scan(&results).Error; err != nil {
 		helpers.ErrorResponse(c, 500, "failed to fetch stores", err)
 		return
 	}
 
-	lastPage := int(math.Ceil(float64(total) / float64(limit)))
-	pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(results), int(total))
+	// lastPage := int(math.Ceil(float64(total) / float64(limit)))
+	// pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(results), int(total))
 
-	c.JSON(http.StatusOK, response.Success("List stores", gin.H{
-		"data": results,
-		"pagination": pagination,
-	}))
+	c.JSON(http.StatusOK, response.Success("List stores", results))
 }
 func DetailStore(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
