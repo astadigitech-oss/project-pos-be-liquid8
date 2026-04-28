@@ -1168,7 +1168,7 @@ func DetailTransactionsShift(c *gin.Context) {
     result.ExpectedCash = shift.TotalCash + shift.InitialCash
     result.ExpectedAmount = shift.ExpectedAmount
     result.ActualCash = shift.ActualCash
-    result.ActualAmount = shift.ExpectedAmount - shift.Difference
+    result.ActualAmount = shift.ExpectedAmount + shift.Difference
     result.Difference = shift.Difference
     result.Note = shift.Note
     

@@ -144,7 +144,7 @@ func EndShift(c *gin.Context) {
 				if e.Tag() == "required" {
 					errorsMap["actual_cash"] = "actual cash wajib diisi"
 				} else if e.Tag() == "gte" {
-					errorsMap["actual_cash"] = "actual cash harus bernilai 0 atau lebih"
+					errorsMap["actual_cash"] = "actual cash harus bernilai lebih dari 0"
 				}
 			default:
 				errorsMap[e.Field()] = "Validasi gagal"
@@ -158,7 +158,10 @@ func EndShift(c *gin.Context) {
 	var shift models.Shift
 	storeID := *user.StoreID
 
-	if err := config.DB.Where("status = ? AND store_id = ?", "open", storeID).First(&shift).Error; err != nil {
+	if err := config.DB.
+		Preload("Store").
+		Preload("UserOpen").
+		Where("status = ? AND store_id = ?", "open", storeID).First(&shift).Error; err != nil {
 		helpers.ErrorResponse(c, 404, "Shift status open tidak ditemukan", err)
 		return
 	}
@@ -176,24 +179,24 @@ func EndShift(c *gin.Context) {
 	
 	summary, err := helpers.RecalculateTransactionShift(config.DB, storeID, shift.ID)
 	if err != nil {
-		helpers.ErrorResponse(c, 422, "Recalculate expected cash gagal", err)
+		helpers.ErrorResponse(c, 422, "Recalculate summary transaction shift failed", err)
 		return
 	}
 
-	ExpectedAmount := shift.InitialCash + summary["total_amount"]
-	ExpectedCash := summary["cash"] + shift.InitialCash
+	ExpectedAmount := shift.InitialCash + summary["total_amount"].(float64)
+	ExpectedCash := summary["cash"].(float64) + shift.InitialCash
 	diff := payload.ActualCash - (ExpectedCash)
 
 	updates := map[string]interface{}{
 		"end_time":   now.UTC(),
 		"status":     "closed",
 
-		"total_cash": summary["cash"],
-		"total_transfer": summary["transfer"],
-		"total_qris": summary["qris"],
-		"total_tax": summary["tax_amount"],
+		"total_cash": summary["cash"].(float64),
+		"total_transfer": summary["transfer"].(float64),
+		"total_qris": summary["qris"].(float64),
+		"total_tax": summary["tax_amount"].(float64),
 
-		"subtotal": summary["subtotal"],
+		"subtotal": summary["subtotal"].(float64),
 		"expected_amount": ExpectedAmount,
 		"actual_cash": payload.ActualCash,
 		"difference": diff,
@@ -205,11 +208,73 @@ func EndShift(c *gin.Context) {
 		helpers.ErrorResponse(c, 500, "Failed to close shift", err)
 		return
 	}
+	shift.ToLocal(user.Store.Timezone)
 
-	// reload
-	config.DB.First(&shift, shift.ID)
+	var result struct { 
+        Start           time.Time  `json:"start"`
+        End             *time.Time `json:"end"` // pointer kalau bisa null
+        UserOpen        string     `json:"user_open"`
+        UserClosed      string    `json:"user_closed"` // pointer kalau bisa null
+        
+        InitialCash     float64    `json:"initial_cash"`
+        TotalInvoice    int64      `json:"total_invoice"`
+        
+        TotalCash       float64     `json:"total_cash"`
+        TotalTransfer       float64     `json:"total_transfer"`
+        TotalQris       float64     `json:"total_qris"`
+        TotalCashCancel       float64     `json:"total_cash_cancel"`
+        TotalTransferCancel       float64     `json:"total_transfer_cancel"`
+        TotalQrisCancel       float64     `json:"total_qris_cancel"`
+        
+        TotalTax        float64    `json:"total_tax"`
+        TotalSubtotal   float64    `json:"total_subtotal"`
+        TotalAmount  float64    `json:"total_penjualan"`
+        TotalRounded  float64    `json:"pembulatan"`
+        ExpectedCash    float64    `json:"expected_cash"`
+        ExpectedAmount    float64    `json:"expected_amount"`
+        ActualCash      float64    `json:"actual_cash"`
+        ActualAmount      float64    `json:"actual_amount"`
+        Difference      float64    `json:"difference"`
+        Note            *string    `json:"note"` // optional
+        
+        Store struct {
+            Name  string  `json:"name"`
+            Phone string `json:"phone"`
+            Address string `json:"address"`
+        } `json:"store"`
+    }
 
-	c.JSON(http.StatusOK, response.Success("Shift closed", shift))
+	result.Start = shift.StartTime
+    result.End = shift.EndTime
+    result.UserOpen = shift.UserOpen.Name
+    result.UserClosed = user.Name
+
+    result.InitialCash = shift.InitialCash
+    result.TotalInvoice = summary["total_invoice"].(int64)
+    
+    result.TotalCash = shift.TotalCash
+    result.TotalTransfer = shift.TotalTransfer
+    result.TotalQris = shift.TotalQris
+    result.TotalCashCancel = summary["total_cash_cancel"].(float64)
+    result.TotalTransferCancel = summary["total_transfer_cancel"].(float64)
+    result.TotalQrisCancel = summary["total_qris_cancel"].(float64)
+    
+    result.TotalTax = shift.TotalTax
+    result.TotalSubtotal = shift.Subtotal
+    result.TotalAmount = summary["total_amount"].(float64)
+    result.TotalRounded = summary["total_rounded"].(float64)
+    result.ExpectedCash = shift.TotalCash + shift.InitialCash
+    result.ExpectedAmount = shift.ExpectedAmount
+    result.ActualCash = shift.ActualCash
+    result.ActualAmount = shift.ExpectedAmount + shift.Difference
+    result.Difference = shift.Difference
+    result.Note = shift.Note
+    
+    result.Store.Name = shift.Store.StoreName
+    result.Store.Phone = shift.Store.Phone
+    result.Store.Address = shift.Store.Address
+
+	c.JSON(http.StatusOK, response.Success("Shift closed", result))
 }
 func GetShiftsByCashier(c *gin.Context) {
 	user := c.MustGet("auth_user").(models.User)

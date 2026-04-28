@@ -293,6 +293,8 @@ func reverse(s string) string {
 }
 
 // ========================== Helper logger =====================
+var Errlog = NewLogger("./logs/errors.log")
+
 func NewLogger(path string) *logrus.Logger {
 	log := logrus.New()
 
@@ -376,14 +378,20 @@ func ParseFlexibleDate(input string, tz string) (time.Time, error) {
     )
 }
 func ErrorResponse(c *gin.Context, status int, message string, err error) {
-
 	response := gin.H{
 		"success": false,
 		"message": message,
 	}
 
 	if err != nil {
-		response["error"] = err.Error()
+		Errlog.WithFields(logrus.Fields{
+		"path":   c.Request.URL.Path,
+		"method": c.Request.Method,
+	}).WithError(err).Error(fmt.Sprintf("%s", message))
+
+		if os.Getenv("APP_ENV") == "development" {
+			response["error"] = err.Error()
+		}
 	}
 
 	c.JSON(status, response)
@@ -438,26 +446,39 @@ func RoundTo500(n int) float64 {
 	return float64((n - remainder) + 1000)
 }
 
-func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (map[string]float64, error) {
+func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (map[string]interface{}, error) {
 	type result struct {
 		Subtotal   float64
+		TotalInvoice int64 
 		TotalAmount float64  //total subtotal + pajak
+		TotalRounded float64  //total pembulatan
 		TaxAmount  float64	 //total pajak
+		
 		Cash       float64
 		Transfer   float64
 		Qris       float64
+
+		CashCancelled float64
+		TransferCancelled float64
+		QrisCancelled float64
 	}
 
 	var res result
 
 	err := db.Model(&models.Transaction{}).
 		Select(`
+			COUNT(*) as total_invoice,
 			COALESCE(SUM(subtotal), 0) AS subtotal,
 			COALESCE(SUM(total_amount), 0) AS total_amount,
 			COALESCE(SUM(tax_price), 0) AS tax_amount,
+			COALESCE(SUM(CASE WHEN status = 'done' THEN rounded_price ELSE 0 END),0) AS total_rounded,
 			COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total_amount ELSE 0 END),0) AS cash,
 			COALESCE(SUM(CASE WHEN payment_method = 'transfer' THEN total_amount ELSE 0 END),0) AS transfer,
-			COALESCE(SUM(CASE WHEN payment_method = 'qris' THEN total_amount ELSE 0 END),0) AS qris
+			COALESCE(SUM(CASE WHEN payment_method = 'qris' THEN total_amount ELSE 0 END),0) AS qris,
+
+			COALESCE(SUM(CASE WHEN payment_method = 'cash' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS cash_cancelled,
+			COALESCE(SUM(CASE WHEN payment_method = 'transfer' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS transfer_cancelled,
+			COALESCE(SUM(CASE WHEN payment_method = 'qris' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS qris_cancelled
 		`).
 		Where("status = ?", "done").
 		Where("shift_id = ?", shiftID).
@@ -468,13 +489,18 @@ func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (m
 		return nil, err
 	}
 
-	return map[string]float64{
+	return map[string]interface{}{
+		"total_invoice":   res.TotalInvoice,
 		"subtotal":   res.Subtotal,
 		"total_amount": res.TotalAmount,
+		"total_rounded": res.TotalRounded,
 		"tax_amount":  res.TaxAmount,
 		"cash":     res.Cash,
 		"transfer": res.Transfer,
 		"qris":     res.Qris,
+		"total_cash_cancel":     res.CashCancelled,
+		"total_transfer_cancel": res.TransferCancelled,
+		"total_qris_cancel":     res.QrisCancelled,
 	}, nil
 }
 func GeneratePendingKeepCode(db *gorm.DB, storeID uint64) (string, error) {
