@@ -561,4 +561,16 @@ func GetActiveShift(db *gorm.DB, storeID uint) (*models.Shift, error) {
 	return &shift, nil
 }
 
+func GetDayIndo(t time.Time) string {
+	days := map[string]string{
+		"Sunday":    "Minggu",
+		"Monday":    "Senin",
+		"Tuesday":   "Selasa",
+		"Wednesday": "Rabu",
+		"Thursday":  "Kamis",
+		"Friday":    "Jumat",
+		"Saturday":  "Sabtu",
+	}
+	return days[t.Format("Monday")]
+}
 

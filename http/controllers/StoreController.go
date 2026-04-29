@@ -87,6 +87,9 @@ func ListStores(c *gin.Context) {
 	c.JSON(http.StatusOK, response.Success("List stores", results))
 }
 func DetailStore(c *gin.Context) {
+	// =======================================
+	// SUMMARY STORE
+	// =======================================
 	id, _ := strconv.Atoi(c.Param("id"))
 	var store models.StoreProfile
 	if err := config.DB.First(&store, id).Error; err != nil {
@@ -94,7 +97,51 @@ func DetailStore(c *gin.Context) {
 		return
 	}
 
-	// products pagination for this store
+	// TOTAL SALES TODAY
+	now, err := helpers.GetCurentTime("Asia/Jakarta")
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	end := start.Add(24*time.Hour - time.Nanosecond)
+	// convert ke UTC
+	startUTC := start.UTC()
+	endUTC := end.UTC()
+
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal mengambil current time", err)
+		return
+	}
+	var totalSales float64
+	if err := config.DB.Raw(`
+		SELECT 
+			COALESCE(SUM(total_amount), 0) as total_sales
+		FROM transactions
+		WHERE status = 'done'
+		AND created_at BETWEEN ? AND ?
+	`, startUTC, endUTC).Scan(&totalSales).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "Failed to fetch today sales", err)
+		return
+	}
+
+	// GET TOTAL STOCK AND PRICE PRODUK
+	var totalAggregate struct {
+		TotalStock int64   `json:"total_stock"`
+		TotalPrice float64 `json:"total_price"`
+	}
+	if err := config.DB.Model(&models.Product{}).
+		Where("store_id = ?", store.ID).
+		Where("status = ?", "display").
+		Select(`
+			COUNT(*) as total_stock,
+			COALESCE(SUM(price),0) as total_price
+		`).
+		Scan(&totalAggregate).Error; err != nil {
+
+		helpers.ErrorResponse(c, 500, "Failed to calculate total stock and price produk in store", err)
+		return
+	}
+
+	// ==============================
+	// GET PRODUK STORE WITH PAGINATION
+	// ==============================
 	q := strings.TrimSpace(c.DefaultQuery("q", ""))
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
@@ -116,7 +163,6 @@ func DetailStore(c *gin.Context) {
 	}
 
 	var rows []productRow
-
 	baseWhere := "WHERE p.store_id = ? AND p.status = 'display'"
 	args := []interface{}{id}
 	if q != "" {
@@ -124,7 +170,6 @@ func DetailStore(c *gin.Context) {
 		baseWhere += " AND (p.name LIKE ? OR p.barcode LIKE ?)"
 		args = append(args, like, like)
 	}
-
 	// count
 	var totalData int64
 	countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM products p %s`, baseWhere)
@@ -132,8 +177,7 @@ func DetailStore(c *gin.Context) {
 		helpers.ErrorResponse(c, 500, "failed to count products", err)
 		return
 	}
-
-	// data
+	// select data produk
 	dataSQL := fmt.Sprintf(`
 		SELECT
 			p.id,
@@ -153,7 +197,7 @@ func DetailStore(c *gin.Context) {
 		helpers.ErrorResponse(c, 500, "failed to fetch products", err)
 		return
 	}
-
+	//convert to timezone store
 	for i := range rows {
 		rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, store.Timezone)
 	}
@@ -161,104 +205,143 @@ func DetailStore(c *gin.Context) {
 	lastPage := int(math.Ceil(float64(totalData) / float64(limit)))
 	pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(totalData))
 
-	// total sales for this store (only completed/done transactions)
-	var totalSales float64
-	if err := config.DB.Raw("SELECT COALESCE(SUM(total_amount),0) FROM transactions WHERE store_id = ? AND status = ?", id, "done").Scan(&totalSales).Error; err != nil {
-		helpers.ErrorResponse(c, 500, "failed to calculate total sales", err)
-		return
-	}
-
 	c.JSON(http.StatusOK, response.Success("Detail store", gin.H{
-		"store": store,
-		"products": gin.H{"data": rows, "pagination": pagination},
-		"total_sales": totalSales,
+		"store": gin.H{
+			"id": store.ID,
+			"store_name": store.StoreName,
+			"phone": store.Phone,
+			"address": store.Address,
+			"total_sales_today": totalSales,
+			"total_stock": totalAggregate.TotalStock,
+			"total_price_product": totalAggregate.TotalPrice,
+		},
+		"products": gin.H{
+			"data": rows, 
+			"pagination": pagination,
+		},
 	}))
 }
-func StoreTransactionsHistories(c *gin.Context) {
+func GetSalePeriodStore(c *gin.Context) {
 	idParam := c.Param("id")
 	storeID, _ := strconv.Atoi(idParam)
 
-	var store models.StoreProfile
-	if err := config.DB.First(&store, storeID).Error; err != nil {
-		helpers.ErrorResponse(c, 404, "store not found", err)
-		return
-	}
+	period := c.DefaultQuery("period", "week")
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
-	if page < 1 { page = 1 }
-	offset := (page - 1) * limit
-
-	// determine current week's Monday..Sunday in store timezone
 	now, err := helpers.GetCurentTime("Asia/Jakarta")
 	if err != nil {
 		helpers.ErrorResponse(c, 500, "Gagal mendapatkan waktu sekarang", err)
 		return
 	}
-	// weekday := int(now.Weekday())
-	// if weekday == 0 { weekday = 7 } // Sunday -> 7
-	start := time.Date(now.Year(), now.Month(), now.Day()-7, 0, 0, 0, 0, now.Location())
-	end := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, int(time.Second-time.Nanosecond), now.Location())
-	startUTC := start.UTC()
-	endUTC := end.UTC()
 
-	type txRow struct {
-		ID uint64 `json:"id"`
-		Invoice string `json:"invoice"`
-		TotalAmount float64 `json:"total_amount"`
-		TotalItem int `json:"total_item"`
-		TotalQuantity int `json:"total_quantity"`
-		PaymentMethod string `json:"payment_method"`
-		Status string `json:"status"`
-		UserName string `json:"user_name"`
-		CreatedAt time.Time `json:"created_at"`
+	var start time.Time
+	var end time.Time
+
+	switch period {
+	case "week":
+		// Week: Monday..Sunday of current week
+		// time.Sunday = 0
+		// time.Monday = 1
+		// time.Tuesday = 2
+		// time.Wednesday = 3
+		// time.Thursday = 4
+		// time.Friday = 5
+		// time.Saturday = 6
+		weekday := int(now.Weekday())
+		if weekday == 0 {
+			weekday = 7
+		}
+		monday := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
+		start = monday
+		end = monday.AddDate(0, 0, 5)
+
+	case "month":
+		start = time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, now.Location())
+		end = time.Date(now.Year(), time.December, 31, 23, 59, 59, 0, now.Location())
+
+	default:
+		start = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		end = start.AddDate(0, 0, 1).Add(-time.Second)
 	}
 
-	var rows []txRow
+	type Row struct {
+		Date  time.Time
+		Total float64
+	}
 
-	baseWhere := "WHERE t.store_id = ? AND t.created_at >= ? AND t.created_at <= ?"
-	args := []interface{}{storeID, startUTC, endUTC}
+	var rows []Row
+	if err := config.DB.Model(&models.Transaction{}).
+		Select("DATE(created_at + INTERVAL 7 HOUR) as date, COALESCE(SUM(total_amount),0) as total").
+		Where("store_id = ?", storeID).
+		Where("status = ? AND created_at >= ? AND created_at <= ?", "done", start.UTC(), end.UTC()).
+		Group("date").
+		Scan(&rows).Error; err != nil {
 
-	// count
-	var total int64
-	countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM transactions t %s`, baseWhere)
-	if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
-		helpers.ErrorResponse(c, 500, "failed to count transactions", err)
+		helpers.ErrorResponse(c, 500, "Failed to calculate sales", err)
 		return
 	}
 
-	dataSQL := fmt.Sprintf(`
-		SELECT
-			t.id,
-			t.invoice,
-			t.total_amount,
-			t.total_item,
-			t.total_quantity,
-			t.payment_method,
-			t.status,
-			COALESCE(u.name, '') as user_name,
-			t.created_at
-		FROM transactions t
-		LEFT JOIN users u ON u.id = t.user_id
-		%s ORDER BY t.created_at DESC LIMIT ? OFFSET ?`, baseWhere)
-
-	args = append(args, limit, offset)
-	if err := config.DB.Raw(dataSQL, args...).Scan(&rows).Error; err != nil {
-		helpers.ErrorResponse(c, 500, "failed to fetch transactions", err)
-		return
+	// Mapping hasil query
+	resultMap := make(map[string]float64)
+	for _, r := range rows {
+		key := r.Date.Format("2006-01-02")
+		resultMap[key] = r.Total
 	}
 
-	for i := range rows {
-		rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, "Asia/Jakarta")
+	// Final result
+	var results []gin.H
+	type resFormat struct {
+		Period    string  `json:"period"`
+		Start     string  `json:"start"`
+		End       string  `json:"end"`
+		Sales     []gin.H `json:"sales"`
+	}
+	payload := resFormat{
+		Period: period,
+	}
+	// WEEK / DAY (per hari)
+	if period == "week" || period == "day" {
+		payload.Start = start.Format("02 January 2006")
+		payload.End = end.Format("02 January 2006")
+
+		for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+
+			key := d.Format("2006-01-02")
+
+			results = append(results, gin.H{
+				"label":		helpers.GetDayIndo(d),
+				"date":        d.Format("02 January 2006"),
+				"total_sales": resultMap[key], // default 0 kalau tidak ada
+			})
+		}
 	}
 
-	lastPage := int(math.Ceil(float64(total) / float64(limit)))
-	pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(total))
+	// MONTH (per bulan)
+	if period == "month" {
+		payload.Start = start.Format("January 2006")
+		payload.End = end.Format("January 2006")
 
-	c.JSON(http.StatusOK, response.Success("Transaction histories", gin.H{
-		"data": rows,
-		"pagination": pagination,
-	}))
+		monthMap := make(map[int]float64)
+
+		// grouping ulang per bulan
+		for _, r := range rows {
+			month := int(r.Date.Month())
+			monthMap[month] += r.Total
+		}
+
+		for m := 1; m <= 12; m++ {
+
+			d := time.Date(now.Year(), time.Month(m), 1, 0, 0, 0, 0, now.Location())
+
+			results = append(results, gin.H{
+				"date":        d.Format("January 2006"),
+				"label":		d.Format("January"),
+				"total_sales": monthMap[m],
+			})
+		}
+	}
+	payload.Sales = results
+
+	c.JSON(http.StatusOK, response.Success("total sales", payload))
 }
 func StoreShiftsHistories(c *gin.Context) {
 	idParam := c.Param("id")

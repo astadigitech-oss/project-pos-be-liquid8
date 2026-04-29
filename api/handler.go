@@ -71,7 +71,6 @@ func RouteHandler(r *gin.Engine) {
 
 			// Transaction
 			rg.GET("transactions", controllers.GetTransactionHistories) //TransactionController.go
-			rg.GET("transactions/:id", controllers.DetailTransaction) //TransactionController.go
 			rg.POST("transactions/checkout", middleware.ShiftCheck(), controllers.CheckoutTransaction) //TransactionController.go
 			rg.DELETE("transactions/:id", controllers.CancelTransaction) //TransactionController.go
 
@@ -87,6 +86,10 @@ func RouteHandler(r *gin.Engine) {
 		protected.POST("admin/members", middleware.RoleCheck([]string{"superadmin","admin"}), controllers.AdminCreateMember) //MemberController.go
 		protected.PUT("members/:id", controllers.UpdateMember) //MemberController.go
 		protected.DELETE("members/:id", controllers.DeleteMember) //MemberController.go
+		//========================================
+		// TRANSACTION
+		//========================================
+		protected.GET("transactions/:id", controllers.DetailTransaction) //TransactionController.go
 		//========================================
 		// USER
 		//========================================
@@ -117,7 +120,7 @@ func RouteHandler(r *gin.Engine) {
 			//========================================
 			rg.GET("stores", controllers.ListStores) //StoreController.go
 			rg.GET("stores/:id", controllers.DetailStore) //StoreController.go
-			rg.GET("stores/:id/transaction-histories", controllers.StoreTransactionsHistories) //StoreController.go
+			rg.GET("stores/:id/sales-period", controllers.GetSalePeriodStore) //StoreController.go
 			rg.GET("stores/:id/shift-histories", controllers.StoreShiftsHistories) //StoreController.go
 			rg.POST("stores", controllers.CreateStore) //StoreController.go
 			rg.PUT("stores/:id", controllers.UpdateStore) //StoreController.go
@@ -150,9 +153,6 @@ func RouteHandler(r *gin.Engine) {
 	}
 
 	// wms service integration
-	api.GET("app-release/:target", controllers.CheckUpdate) // VersionController.go
-	api.GET("installer/:target/file/:file", controllers.DownloadInstaller) // VersionController.go
-	api.GET("update/:target/file/:file", controllers.DownloadUpdater) // VersionController.go
 	wmsService := api.Group("")
 	wmsService.Use(middleware.OAuthCheck())
 	{
@@ -165,6 +165,9 @@ func RouteHandler(r *gin.Engine) {
 	}
 
 	// //version handler
+	api.GET("app-release/:target", controllers.CheckUpdate) // VersionController.go
+	api.GET("installer/:target/file/:file", controllers.DownloadInstaller) // VersionController.go
+	api.GET("update/:target/file/:file", controllers.DownloadUpdater) // VersionController.go
 	versionService := api.Group("")
 	versionService.Use(middleware.StaticAuth())
 	{

@@ -201,7 +201,7 @@ func GetTotalSalesByFilter(c *gin.Context) {
 			key := d.Format("2006-01-02")
 
 			results = append(results, gin.H{
-				"label":		getDayIndo(d),
+				"label":		helpers.GetDayIndo(d),
 				"date":        d.Format("02 January 2006"),
 				"total_sales": resultMap[key], // default 0 kalau tidak ada
 			})
@@ -235,17 +235,4 @@ func GetTotalSalesByFilter(c *gin.Context) {
 	payload.Sales = results
 
 	c.JSON(http.StatusOK, response.Success("total sales", payload))
-}
-
-func getDayIndo(t time.Time) string {
-	days := map[string]string{
-		"Sunday":    "Minggu",
-		"Monday":    "Senin",
-		"Tuesday":   "Selasa",
-		"Wednesday": "Rabu",
-		"Thursday":  "Kamis",
-		"Friday":    "Jumat",
-		"Saturday":  "Sabtu",
-	}
-	return days[t.Format("Monday")]
 }

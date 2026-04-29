@@ -40,7 +40,7 @@ func AuthCheck() gin.HandlerFunc {
 		})
 
 		if err != nil || !token.Valid {
-			config.DB.Where("token = ?", tokenString).Delete(&models.UserToken{})
+			config.DB.Where("token = ?", tokenString).Delete(&models.UserToken{}) //hapus jika masih ada di database
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "token tidak valid atau kadaluarsa"})
 			c.Abort()
 			return
