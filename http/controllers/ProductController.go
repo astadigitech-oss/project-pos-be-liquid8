@@ -20,6 +20,7 @@ import (
 
 // ListProducts returns paginated products filtered by q (search name or barcode)
 func ListAllProducts(c *gin.Context) {
+    store_id := strings.TrimSpace(c.DefaultQuery("store_id", ""))
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
     limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
@@ -46,9 +47,22 @@ func ListAllProducts(c *gin.Context) {
 
     baseWhere := "WHERE p.status = 'display'"
     args := []interface{}{}
+
+    if store_id != "" {
+        var store models.StoreProfile
+        storeID, _ := strconv.Atoi(store_id)
+        if err := config.DB.First(&store, storeID).Error; err != nil {
+            helpers.ErrorResponse(c, 404, "store not found", err)
+            return
+        }
+
+        baseWhere += " AND p.store_id = ?"
+        args = append(args, store.ID)
+    }
+
     if q != "" {
         like := "%" + q + "%"
-        baseWhere += "AND (p.name LIKE ? OR p.barcode LIKE ? OR s.store_name LIKE ?)"
+        baseWhere += " AND (p.name LIKE ? OR p.barcode LIKE ? OR p.old_barcode LIKE ? OR s.store_name LIKE ?)"
         args = append(args, like, like, like)
     }
 
