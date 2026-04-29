@@ -10,6 +10,7 @@ import (
 	"liquid8/pos/config"
 	"liquid8/pos/helpers"
 	"liquid8/pos/http/response"
+	"liquid8/pos/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -17,12 +18,14 @@ import (
 
 // ListMigrateHistories returns all migrate product histories
 func ListMigrateHistories(c *gin.Context) {
+    store_id := strings.TrimSpace(c.DefaultQuery("store_id", ""))
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
     if page < 1 { page = 1 }
     limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
     offset := (page-1)*limit
 
+    var store models.StoreProfile
     type resultFormat struct {
         ID             uint64 `json:"id"`
         StoreID        uint64 `json:"store_id"`
@@ -44,10 +47,21 @@ func ListMigrateHistories(c *gin.Context) {
         mph.total_price, 
         mph.created_at
     `).Joins("LEFT JOIN store_profiles s ON s.id = mph.store_id")
+    
+    if store_id != "" {
+        storeID, _ := strconv.Atoi(store_id)
+        if err := config.DB.First(&store, storeID).Error; err != nil {
+            helpers.ErrorResponse(c, 404, "store not found", err)
+            return
+        }
+
+        db.Where("mph.store_id = ?", store.ID)
+    }
+
     if q != "" {
         like := "%" + q + "%"
         // search by code or user or store name via join
-        db = db.Where("mph.code LIKE ? OR mph.user LIKE ? OR s.store_name LIKE ?", like, like, like)
+        db = db.Where("(mph.code LIKE ? OR mph.user LIKE ? OR s.store_name LIKE ?)", like, like, like)
     }
 
     var total int64
