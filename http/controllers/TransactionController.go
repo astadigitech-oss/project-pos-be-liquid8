@@ -1012,7 +1012,12 @@ func DetailTransactionsShift(c *gin.Context) {
         return
     }
 
-    shift.ToLocal(user.Store.Timezone)
+    timezone := "Asia/Jakarta"
+    if user.Role == "kasir" {
+        timezone = user.Store.Timezone
+    }
+
+    shift.ToLocal(timezone)
 
     var summary struct {
         TotalInvoice int64
@@ -1135,7 +1140,7 @@ func DetailTransactionsShift(c *gin.Context) {
     }
 
     for i := range rows {
-        rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, user.Store.Timezone)
+        rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, timezone)
     }
 
     // lastPage := int(math.Ceil(float64(total)/float64(limit)))
@@ -1291,7 +1296,7 @@ func GetAllTransactions(c *gin.Context) {
 
     baseWhere := "WHERE 1=1"
     args := []interface{}{}
-    
+
     if store_id != "" {
         storeID, _ := strconv.Atoi(store_id)
         if err := config.DB.First(&store, storeID).Error; err != nil {
