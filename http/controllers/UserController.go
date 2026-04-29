@@ -395,7 +395,7 @@ func UpdateUser(c *gin.Context) {
 			bcrypt.DefaultCost,
 		)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			helpers.ErrorResponse(c, 400, "Gagal melakukan hased password", err)
 			return
 		}
 		user.Password = string(hashedPassword)
