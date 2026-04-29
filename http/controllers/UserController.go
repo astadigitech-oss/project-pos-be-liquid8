@@ -95,8 +95,31 @@ func GetUsers(c *gin.Context) {
 func DetailUser(c *gin.Context) {
 	userID := c.Param("id")
 
-	var user models.User
-	if err := config.DB.Preload("Store").First(&user, userID).Error; err != nil {
+	type userResponse struct {
+		ID    uint
+		StoreID    uint
+		Name  string
+		Username  string
+		Role  string
+		Email string
+		StoreName    string
+	}
+
+	var user userResponse
+	if err := config.DB.
+		Model(&models.User{}).
+		Select(`
+			users.id, 
+			users.store_id, 
+			users.username, 
+			users.name, 
+			users.email, 
+			users.role, 
+			COALESCE(sp.store_name, "-") as store_name
+		`).
+		Joins("LEFT JOIN store_profiles sp ON sp.id = users.store_id").
+		First(&user, userID).Error; err != nil {
+
 		helpers.ErrorResponse(c, http.StatusNotFound, "User tidak ditemukan", err)
 		return
 	}
