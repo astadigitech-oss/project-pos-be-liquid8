@@ -235,7 +235,7 @@ func ReceiveMigrateDocument(c *gin.Context) {
     // idempotency: check if any product already inserted with this document code for the store
     var exists int64
     if err := config.DB.Model(&models.MigrateProductHistory{}).
-        Where("code = ? AND store_id = ?", payload.DocumentCode, store.ID).
+        Where("code = ?", payload.DocumentCode).
         Count(&exists).Error; err != nil {
         helpers.ErrorResponse(c, 500, "failed to check existing document", err)
         return
@@ -267,7 +267,6 @@ func ReceiveMigrateDocument(c *gin.Context) {
         err := config.DB.
             Model(&models.Product{}).
             Select("barcode, status, deleted_at").
-            Where("store_id = ?", store.ID).
             Where("barcode IN ?", chunk).
             Where(`
                 status = 'sale' 
