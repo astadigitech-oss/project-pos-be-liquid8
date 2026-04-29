@@ -1262,11 +1262,14 @@ func CancelTransaction(c *gin.Context) {
 }
 //ADMIN
 func GetAllTransactions(c *gin.Context) {
+    store_id := strings.TrimSpace(c.DefaultQuery("store_id", ""))
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
     limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
     if page < 1 { page = 1 }
     offset := (page-1)*limit
+
+    var store models.StoreProfile
 
     type txRow struct {
         ID uint64 `json:"id"`
@@ -1274,7 +1277,7 @@ func GetAllTransactions(c *gin.Context) {
         TotalItem int `json:"total_item"`
         TotalQuantity int `json:"total_quantity"`
         CustomerName string `json:"customer_name"`
-        Kasir string `json:"kasir"`
+        // Kasir string `json:"kasir"`
         StoreName string `json:"store_name"`
         Subtotal float64 `json:"subtotal"`
         Tax float64 `json:"tax"`
@@ -1288,9 +1291,21 @@ func GetAllTransactions(c *gin.Context) {
 
     baseWhere := "WHERE 1=1"
     args := []interface{}{}
+    
+    if store_id != "" {
+        storeID, _ := strconv.Atoi(store_id)
+        if err := config.DB.First(&store, storeID).Error; err != nil {
+            helpers.ErrorResponse(c, 404, "store not found", err)
+            return
+        }
+
+        baseWhere += " AND t.store_id = ?"
+        args = append(args, store.ID)
+    }
+
     if q != "" {
         like := "%"+q+"%"
-        baseWhere += " AND (t.invoice LIKE ? OR u.name LIKE ? OR m.name LIKE ? OR s.store_name LIKE ?)"
+        baseWhere += " AND (t.invoice LIKE ? OR m.name LIKE ? OR s.store_name LIKE ?)"
         args = append(args, like, like, like, like)
     }
 
@@ -1308,16 +1323,14 @@ func GetAllTransactions(c *gin.Context) {
             t.total_item,
             t.total_quantity,
             COALESCE(m.name, '') AS customer_name,
-            COALESCE(u.name, 'Unknown') AS kasir,
             COALESCE(s.store_name, '') AS store_name,
             t.subtotal,
-            COALESCE(t.subtotal * t.tax / 100, 0) AS tax,
+            COALESCE(t.tax_price, 0) AS tax,
             t.total_amount,
             t.status,
             t.payment_method,
             t.created_at
         FROM transactions t
-        LEFT JOIN users u ON u.id = t.user_id
         LEFT JOIN members m ON m.id = t.member_id
         LEFT JOIN store_profiles s ON s.id = t.store_id
         %s
