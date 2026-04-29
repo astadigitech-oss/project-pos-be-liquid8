@@ -46,8 +46,6 @@ func RouteHandler(r *gin.Engine) {
 			//========================================
 			rg.GET("shifts", controllers.GetShiftsByCashier) //ShiftController.go
 			rg.GET("shifts-active", controllers.CurrentShift) //ShiftController.go
-			rg.GET("shifts/:shift_id/transaction", controllers.DetailTransactionsShift) //TransactionController.go
-			rg.GET("shifts/all", controllers.GetAllShifts) //ShiftController.go
 			rg.POST("shifts/start", controllers.StartShift) //ShiftController.go
 			rg.POST("shifts/end", controllers.EndShift)	//ShiftController.go
 			
@@ -86,10 +84,13 @@ func RouteHandler(r *gin.Engine) {
 		protected.POST("admin/members", middleware.RoleCheck([]string{"superadmin","admin"}), controllers.AdminCreateMember) //MemberController.go
 		protected.PUT("members/:id", controllers.UpdateMember) //MemberController.go
 		protected.DELETE("members/:id", controllers.DeleteMember) //MemberController.go
+		
 		//========================================
-		// TRANSACTION
+		// SHIFT & TRANSACTION
 		//========================================
 		protected.GET("transactions/:id", controllers.DetailTransaction) //TransactionController.go
+		protected.GET("shifts/:shift_id/transaction", controllers.DetailTransactionsShift) //TransactionController.go
+		
 		//========================================
 		// USER
 		//========================================
@@ -119,6 +120,7 @@ func RouteHandler(r *gin.Engine) {
 			// TOKO
 			//========================================
 			rg.GET("stores", controllers.ListStores) //StoreController.go
+			rg.GET("stores-dropdown", controllers.ListStoresDropdown) //StoreController.go
 			rg.GET("stores/:id", controllers.DetailStore) //StoreController.go
 			rg.GET("stores/:id/sales-period", controllers.GetSalePeriodStore) //StoreController.go
 			rg.GET("stores/:id/shift-histories", controllers.StoreShiftsHistories) //StoreController.go
@@ -129,6 +131,11 @@ func RouteHandler(r *gin.Engine) {
 			// TRANSACTION
 			//========================================
 			rg.GET("transactions/all", controllers.GetAllTransactions) //TransactionController.go
+
+			//========================================
+			// SHIFT
+			//========================================
+			rg.GET("shifts/all", controllers.GetAllShifts) //ShiftController.go
 
 			//========================================
 			// USER

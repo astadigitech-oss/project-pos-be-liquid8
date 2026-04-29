@@ -14,17 +14,18 @@ import (
 	"liquid8/pos/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // ListStores returns paginated store profiles
 func ListStores(c *gin.Context) {
 	q := strings.TrimSpace(c.DefaultQuery("q", ""))
-	// page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	// if page < 1 {
-	// 	page = 1
-	// }
-	// limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
-	// offset := (page - 1) * limit
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
+	offset := (page - 1) * limit
 
 	type formatRes struct {
 		ID              uint       `json:"id"`
@@ -69,22 +70,44 @@ func ListStores(c *gin.Context) {
 	}
 
 	// count total
-	// var total int64
-	// if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-	// 	helpers.ErrorResponse(c, 500, "failed to count stores", err)
-	// 	return
-	// }
+	var total int64
+	if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "failed to count stores", err)
+		return
+	}
 
 	// fetch data
-	if err := db.Scan(&results).Error; err != nil {
+	if err := db.Limit(limit).Offset(offset).Scan(&results).Error; err != nil {
 		helpers.ErrorResponse(c, 500, "failed to fetch stores", err)
 		return
 	}
 
-	// lastPage := int(math.Ceil(float64(total) / float64(limit)))
-	// pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(results), int(total))
+	lastPage := int(math.Ceil(float64(total) / float64(limit)))
+	pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(results), int(total))
 
-	c.JSON(http.StatusOK, response.Success("List stores", results))
+	c.JSON(http.StatusOK, response.Success("List stores", gin.H{
+		"data": results,
+		"pagination": pagination,
+	}))
+}
+func ListStoresDropdown(c *gin.Context) {
+	type formatRes struct {
+		ID              uint       `json:"id"`
+		StoreName		string	   `json:"store_name"`
+	}
+
+	var results []formatRes
+
+	if err := config.DB.Model(&models.StoreProfile{}).Select(`
+			id,
+			store_name
+		`).Scan(&results).Error; err != nil {
+
+		helpers.ErrorResponse(c, 500, "Gagal mengambil store list", err);
+		return
+	}
+
+	c.JSON(http.StatusOK, results)
 }
 func DetailStore(c *gin.Context) {
 	// =======================================
