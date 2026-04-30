@@ -395,8 +395,9 @@ func GetCurrentCart(c *gin.Context) {
     }
 
     ppn_price := math.Round(totalSubtotal * (ppn.Ppn / 100))
-    totalAmount = math.Round(totalSubtotal + ppn_price)
-    totalAmount = helpers.RoundTo500(int(totalAmount))
+    totalBelanja := math.Round(totalSubtotal + ppn_price)
+    totalAmount = helpers.RoundTo500(int(totalBelanja))
+    pembulatan := totalAmount - totalBelanja
 
     payload := gin.H{
         "items": items,
@@ -406,6 +407,7 @@ func GetCurrentCart(c *gin.Context) {
             "amount": ppn_price,
         },
         "total_amount": totalAmount,
+        "pembulatan": pembulatan,
     }
 
     c.JSON(http.StatusOK, response.Success("Current cart", payload))
