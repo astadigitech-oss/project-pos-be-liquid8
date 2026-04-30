@@ -6,10 +6,12 @@ import (
 	"liquid8/pos/config"
 	"liquid8/pos/helpers"
 	"liquid8/pos/models"
+	"strings"
 
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 	// "github.com/go-playground/validator/v10"
 )
@@ -87,13 +89,7 @@ func StorePPN(c *gin.Context) {
 		Count(&count)
 
 	if count > 0 {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"success": false,
-			"message": "Validasi gagal",
-			"errors": gin.H{
-				"ppn": "PPN sudah terdaftar",
-			},
-		})
+		helpers.ErrorResponse(c, 422, fmt.Sprintf("PPN %.2f sudah terdaftar", payload.PPN), nil)
 		return
 	}
 
@@ -130,13 +126,35 @@ func UpdatePPN(c *gin.Context) {
 
 	// Bind & validate
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"success": false,
+		ve, ok := err.(validator.ValidationErrors)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status":  false,
+				"message": "Payload tidak valid",
+			})
+			return
+		}
+
+		errors := make(map[string]string)
+
+		for _, e := range ve {
+			field := strings.ToLower(e.Field())
+
+			switch field {
+				case "ppn":
+					errors["ppn"] = "Nilai PPN wajib diisi"
+				default: 
+					errors[field] = "Format tidak valid pada"
+			}
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  false,
 			"message": "Validasi gagal",
-			"errors":  err.Error(),
+			"errors":  errors,
 		})
 		return
-	}
+	}	
 
 	db := config.DB
 
@@ -154,9 +172,9 @@ func UpdatePPN(c *gin.Context) {
 	var existingPPN models.Ppn
 	if err := db.First(&existingPPN, ppn_id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Data ppn tidak ditemukan"})
-		}else {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message":"Gagal mengambil data ppn", "error": err.Error()})
+			helpers.ErrorResponse(c, 404, "Data ppn tidak ditemukan", nil)
+		} else {
+			helpers.ErrorResponse(c, 404, "Gagal mengambil dat ppn", err)
 		}
 
 		return
@@ -170,13 +188,7 @@ func UpdatePPN(c *gin.Context) {
 		Count(&count)
 
 	if count > 0 {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"success": false,
-			"message": "Validasi gagal",
-			"errors": gin.H{
-				"ppn": "PPN sudah terdaftar",
-			},
-		})
+		helpers.ErrorResponse(c, 422, fmt.Sprintf("PPN %.2f sudah terdaftar", payload.PPN), nil)
 		return
 	}
 
@@ -186,14 +198,26 @@ func UpdatePPN(c *gin.Context) {
 	}
 
 	if payload.IsTaxDefault != nil {
-		updates["is_tax_default"] = payload.IsTaxDefault
-
-		if err := db.Session(&gorm.Session{
-			AllowGlobalUpdate: true,
-		}).Model(&models.Ppn{}).Update("is_tax_default", false).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		// Tidak boleh ubah dari true -> false
+		if existingPPN.IsTaxDefault && *payload.IsTaxDefault == false {
+			helpers.ErrorResponse(c, 422, "PPN default tidak boleh di nonaktifkan", nil)
 			return
 		}
+
+		// Jika set jadi default
+		if *payload.IsTaxDefault == true {
+			// reset semua jadi false
+			if err := db.Session(&gorm.Session{
+				AllowGlobalUpdate: true,
+			}).Model(&models.Ppn{}).
+				Update("is_tax_default", false).Error; err != nil {
+
+				helpers.ErrorResponse(c, 500, "Gagal reset default PPN", err)
+				return
+			}
+		}
+
+		updates["is_tax_default"] = *payload.IsTaxDefault
 	}
 
 	if err := db.Model(&existingPPN).Updates(updates).Error; err != nil {
