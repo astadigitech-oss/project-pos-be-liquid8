@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"liquid8/pos/config"
+	"liquid8/pos/helpers"
 	"liquid8/pos/models"
 
 	"net/http"
@@ -37,9 +38,9 @@ func DetailPPN(c *gin.Context) {
 	var ppn models.Ppn
 	if err := config.DB.First(&ppn, ppnID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Data ppn tidak ditemukan"})
+			helpers.ErrorResponse(c, 404, "Data ppn tidak ditemukan", nil)
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "Gagal mengambil data ppn", "error": err.Error()})
+			helpers.ErrorResponse(c, 404, "Gagal mengambil dat ppn", err)
 		}
 		return
 	}

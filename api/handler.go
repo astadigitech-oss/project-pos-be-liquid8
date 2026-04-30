@@ -70,7 +70,6 @@ func RouteHandler(r *gin.Engine) {
 			// Transaction
 			rg.GET("transactions", controllers.GetTransactionHistories) //TransactionController.go
 			rg.POST("transactions/checkout", middleware.ShiftCheck(), controllers.CheckoutTransaction) //TransactionController.go
-			rg.DELETE("transactions/:id", controllers.CancelTransaction) //TransactionController.go
 
 		})
 	
@@ -90,6 +89,7 @@ func RouteHandler(r *gin.Engine) {
 		//========================================
 		protected.GET("transactions/:id", controllers.DetailTransaction) //TransactionController.go
 		protected.GET("shifts/:shift_id/transaction", controllers.DetailTransactionsShift) //TransactionController.go
+		protected.DELETE("transactions/:id", controllers.CancelTransaction) //TransactionController.go
 		
 		//========================================
 		// USER
@@ -104,10 +104,10 @@ func RouteHandler(r *gin.Engine) {
 			// PPN
 			//========================================
 			rg.GET("ppns", controllers.GetPPN) //PPNController.go
-			rg.GET("ppns/:id", controllers.DetailPPN) //PPNController.go
+			rg.GET("ppns/:ppn_id", controllers.DetailPPN) //PPNController.go
 			rg.POST("ppns", controllers.StorePPN) //PPNController.go
-			rg.PUT("ppns/:id", controllers.UpdatePPN) //PPNController.go
-			rg.DELETE("ppns/:id", controllers.DeletePPN) //PPNController.go
+			rg.PUT("ppns/:ppn_id", controllers.UpdatePPN) //PPNController.go
+			rg.DELETE("ppns/:ppn_id", controllers.DeletePPN) //PPNController.go
 			
 			//========================================
 			// DASHBOARD
