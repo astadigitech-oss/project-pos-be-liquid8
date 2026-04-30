@@ -561,6 +561,26 @@ func DeleteProdukBKL(c *gin.Context) {
         deletableIDs = append(deletableIDs, p.ID)
     }
 
+    if len(skippedSale) > 0 {
+        c.JSON(422, gin.H{
+            "success": false,
+            "message": "Terdapat beberapa barcode produk yang sudah terjual",
+            "data": skippedSale,
+        })
+
+        return
+    }
+
+    if len(missing) > 0 {
+        c.JSON(422, gin.H{
+            "success": false,
+            "message": "Terdapat beberapa barcode produk yang tidak ditemukan",
+            "data": missing,
+        })
+
+        return
+    }
+
     // =========================
     // DELETE SAFE DATA
     // =========================
