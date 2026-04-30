@@ -64,10 +64,9 @@ func GetDashboardData(c *gin.Context) {
 		SELECT 
 			s.id as store_id,
 			s.store_name as store_name,
-			count(p.id) as stock
+			COALESCE(count(p.id), 0) as stock
 		FROM store_profiles s
-		LEFT JOIN products p ON p.store_id = s.id
-		WHERE p.status = 'display'
+		LEFT JOIN products p ON p.store_id = s.id AND p.status = 'display'
 		GROUP BY s.id, s.store_name
 	`).Scan(&storeStocks).Error; err != nil {
 		helpers.ErrorResponse(c, 500, "Failed to fetch stock per store", err)
