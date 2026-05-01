@@ -646,11 +646,17 @@ func CheckoutTransaction(c *gin.Context) {
 
     totalQty := 0
 	subTotal := float64(0)
-    type txRowModel struct {
-        Name     string  `json:"product_name"`
-        Price    float64 `json:"price"`
+    
+    // type txRowModel struct {
+    //     Name     string  `json:"product_name"`
+    //     Price    float64 `json:"price"`
+    // }
+    type txRowPriceModel struct {
+        Price     float64  `json:"price"`
+        Quantity    int64 `json:"quantity"`
     }
-    var txRow []txRowModel
+    // var txRow []txRowModel
+    priceMap := make(map[float64]int64)
     var productIDs []uint64
     // migrate items
     for _, it := range items {
@@ -666,10 +672,11 @@ func CheckoutTransaction(c *gin.Context) {
         }
 
         productIDs = append(productIDs, it.ProductID)
-        txRow = append(txRow, txRowModel{
-            Name:     it.ProductName,
-            Price:    it.Price,
-        })
+        priceMap[it.Price] += 1
+        // txRow = append(txRow, txRowModel{
+        //     Name:     it.ProductName,
+        //     Price:    it.Price,
+        // })
 
         if err := tx.Create(&ti).Error; err != nil {
             tx.Rollback()
@@ -679,6 +686,15 @@ func CheckoutTransaction(c *gin.Context) {
 
         totalQty += int(it.Quantity)
 		subTotal += it.Subtotal
+    }
+
+    //Grouping price
+    var txRowPrice []txRowPriceModel
+    for price, qty := range priceMap {
+        txRowPrice = append(txRowPrice, txRowPriceModel{
+            Price:    price,
+            Quantity: qty,
+        })
     }
 
     ppnAmount := math.Round(subTotal * (ppn.Ppn / 100))
@@ -780,7 +796,8 @@ func CheckoutTransaction(c *gin.Context) {
             "tax": ppn.Ppn,
             "amount": ppnAmount,
         },
-        "items": txRow,
+        "items": txRowPrice,
+        // "items_price": txRowPrice,
     }))
 }
 func GetTransactionHistories(c *gin.Context) {
@@ -888,10 +905,15 @@ func DetailTransaction(c *gin.Context) {
         return
     }
 
-    type transactionItemResponse struct {
+    type transactionPerItem struct {
         ID       uint64  `json:"id"`
         Barcode  string  `json:"barcode"`
         ProductName     string  `json:"product_name"`
+        Price    float64 `json:"price"`
+        Quantity int64   `json:"quantity"`
+    }
+    
+    type transactionItemPrice struct {
         Price    float64 `json:"price"`
         Quantity int64   `json:"quantity"`
     }
@@ -923,7 +945,8 @@ func DetailTransaction(c *gin.Context) {
             Amount float64 `json:"amount"`
         } `json:"ppn"`
 
-        Items []transactionItemResponse `json:"items"`
+        Items []transactionItemPrice `json:"items"`
+        // ItemsPrice []transactionItemPrice `json:"items_price"`
     }
 
     var tx models.Transaction
@@ -961,26 +984,44 @@ func DetailTransaction(c *gin.Context) {
     result.Ppn.Tax = tx.Tax
     result.Ppn.Amount = tx.TaxPrice
 
-    // ambil items
-    var items []transactionItemResponse
-    queryItems := `
-        SELECT 
-            ti.id,
-            p.barcode,
-            ti.product_name,
+    // ambil per items
+    // var items []transactionPerItem
+    // queryItems := `
+    //     SELECT 
+    //         ti.id,
+    //         p.barcode,
+    //         ti.product_name,
+    //         ti.price,
+    //         ti.quantity
+    //     FROM transaction_items ti
+    //     LEFT JOIN products p ON p.id = ti.product_id
+    //     WHERE ti.transaction_id = ?
+    // `
+
+    // if err := config.DB.Raw(queryItems, id).Scan(&items).Error; err != nil {
+    //     helpers.ErrorResponse(c, 500, "Failed get items", err)
+    //     return
+    // }
+
+    // gourp item by price
+    var itemsPrice []transactionItemPrice
+    queryItemsPrice := `
+        SELECT
             ti.price,
-            ti.quantity
+            COUNT(*) as quantity
         FROM transaction_items ti
-        LEFT JOIN products p ON p.id = ti.product_id
         WHERE ti.transaction_id = ?
+        GROUP BY ti.price
+        ORDER BY ti.price ASC
     `
 
-    if err := config.DB.Raw(queryItems, id).Scan(&items).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "Failed get items", err)
+    if err := config.DB.Raw(queryItemsPrice, id).Scan(&itemsPrice).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed group items transaction", err)
         return
     }
 
-    result.Items = items
+    result.Items = itemsPrice
+    // result.ItemsPrice = itemsPrice
 
     c.JSON(http.StatusOK, gin.H{
         "success":  true,
