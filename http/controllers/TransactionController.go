@@ -945,8 +945,8 @@ func DetailTransaction(c *gin.Context) {
             Amount float64 `json:"amount"`
         } `json:"ppn"`
 
-        Items []transactionItemPrice `json:"items"`
-        // ItemsPrice []transactionItemPrice `json:"items_price"`
+        Items []transactionPerItem `json:"items"`
+        ItemsPrice []transactionItemPrice `json:"items_price"`
     }
 
     var tx models.Transaction
@@ -985,23 +985,23 @@ func DetailTransaction(c *gin.Context) {
     result.Ppn.Amount = tx.TaxPrice
 
     // ambil per items
-    // var items []transactionPerItem
-    // queryItems := `
-    //     SELECT 
-    //         ti.id,
-    //         p.barcode,
-    //         ti.product_name,
-    //         ti.price,
-    //         ti.quantity
-    //     FROM transaction_items ti
-    //     LEFT JOIN products p ON p.id = ti.product_id
-    //     WHERE ti.transaction_id = ?
-    // `
+    var items []transactionPerItem
+    queryItems := `
+        SELECT 
+            ti.id,
+            p.barcode,
+            ti.product_name,
+            ti.price,
+            ti.quantity
+        FROM transaction_items ti
+        LEFT JOIN products p ON p.id = ti.product_id
+        WHERE ti.transaction_id = ?
+    `
 
-    // if err := config.DB.Raw(queryItems, id).Scan(&items).Error; err != nil {
-    //     helpers.ErrorResponse(c, 500, "Failed get items", err)
-    //     return
-    // }
+    if err := config.DB.Raw(queryItems, id).Scan(&items).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed get items", err)
+        return
+    }
 
     // gourp item by price
     var itemsPrice []transactionItemPrice
@@ -1020,8 +1020,8 @@ func DetailTransaction(c *gin.Context) {
         return
     }
 
-    result.Items = itemsPrice
-    // result.ItemsPrice = itemsPrice
+    result.Items = items
+    result.ItemsPrice = itemsPrice
 
     c.JSON(http.StatusOK, gin.H{
         "success":  true,
