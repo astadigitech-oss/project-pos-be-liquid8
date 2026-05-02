@@ -45,6 +45,7 @@ func GetUsers(c *gin.Context) {
 
 	//inisialisasi query
 	query := config.DB.Table("users u").Select(`
+		u.id,
 		u.name,
 		u.username,
 		u.email,
