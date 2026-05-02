@@ -44,12 +44,12 @@ func ListStores(c *gin.Context) {
 			store_profiles.store_name,
 			store_profiles.phone,
 			store_profiles.address,
-			COALESCE(p.total_products, 0) as total_products,
+			COALESCE(p.total_product, 0) as total_product,
 			COALESCE(t.total_sales, 0) as total_sales
 		`).
 		Joins(`
 			LEFT JOIN (
-				SELECT store_id, COUNT(*) as total_products
+				SELECT store_id, COUNT(*) as total_product
 				FROM products
 				WHERE status = 'display'
 				GROUP BY store_id
