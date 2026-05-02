@@ -145,7 +145,7 @@ func GetTotalSalesByFilter(c *gin.Context) {
 		}
 		monday := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
 		start = monday
-		end = monday.AddDate(0, 0, 5)
+		end = monday.AddDate(0, 0, 6).Add(-time.Second)
 
 	case "month":
 		start = time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, now.Location())
