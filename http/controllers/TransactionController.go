@@ -654,6 +654,7 @@ func CheckoutTransaction(c *gin.Context) {
     type txRowPriceModel struct {
         Price     float64  `json:"price"`
         Quantity    int64 `json:"quantity"`
+        Total    float64 `json:"total"`
     }
     // var txRow []txRowModel
     priceMap := make(map[float64]int64)
@@ -694,6 +695,7 @@ func CheckoutTransaction(c *gin.Context) {
         txRowPrice = append(txRowPrice, txRowPriceModel{
             Price:    price,
             Quantity: qty,
+            Total: price * float64(qty),
         })
     }
 
@@ -916,6 +918,7 @@ func DetailTransaction(c *gin.Context) {
     type transactionItemPrice struct {
         Price    float64 `json:"price"`
         Quantity int64   `json:"quantity"`
+        Total float64   `json:"total"`
     }
 
     // 🔹 Struct response
@@ -945,8 +948,8 @@ func DetailTransaction(c *gin.Context) {
             Amount float64 `json:"amount"`
         } `json:"ppn"`
 
-        Items []transactionPerItem `json:"items"`
-        ItemsPrice []transactionItemPrice `json:"items_price"`
+        Products []transactionPerItem `json:"products"`
+        Items []transactionItemPrice `json:"items"`
     }
 
     var tx models.Transaction
@@ -1007,12 +1010,18 @@ func DetailTransaction(c *gin.Context) {
     var itemsPrice []transactionItemPrice
     queryItemsPrice := `
         SELECT
-            ti.price,
-            COUNT(*) as quantity
-        FROM transaction_items ti
-        WHERE ti.transaction_id = ?
-        GROUP BY ti.price
-        ORDER BY ti.price ASC
+            price,
+            quantity,
+            price * quantity as total
+        FROM (
+            SELECT
+                ti.price,
+                COUNT(*) as quantity
+            FROM transaction_items ti
+            WHERE ti.transaction_id = ?
+            GROUP BY ti.price
+        ) t
+        ORDER BY price ASC
     `
 
     if err := config.DB.Raw(queryItemsPrice, id).Scan(&itemsPrice).Error; err != nil {
@@ -1020,8 +1029,8 @@ func DetailTransaction(c *gin.Context) {
         return
     }
 
-    result.Items = items
-    result.ItemsPrice = itemsPrice
+    result.Products = items
+    result.Items = itemsPrice
 
     c.JSON(http.StatusOK, gin.H{
         "success":  true,
