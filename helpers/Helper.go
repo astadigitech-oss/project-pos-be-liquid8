@@ -468,19 +468,19 @@ func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (m
 	err := db.Model(&models.Transaction{}).
 		Select(`
 			COUNT(*) as total_invoice,
-			COALESCE(SUM(subtotal), 0) AS subtotal,
-			COALESCE(SUM(total_amount), 0) AS total_amount,
-			COALESCE(SUM(tax_price), 0) AS tax_amount,
+			COALESCE(SUM(CASE WHEN status = 'done' THEN subtotal ELSE 0 END), 0) AS subtotal,
+			COALESCE(SUM(CASE WHEN status = 'done' THEN total_amount ELSE 0 END), 0) AS total_amount,
+			COALESCE(SUM(CASE WHEN status = 'done' THEN tax_price ELSE 0 END), 0) AS tax_amount,
 			COALESCE(SUM(CASE WHEN status = 'done' THEN rounded_price ELSE 0 END),0) AS total_rounded,
-			COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total_amount ELSE 0 END),0) AS cash,
-			COALESCE(SUM(CASE WHEN payment_method = 'transfer' THEN total_amount ELSE 0 END),0) AS transfer,
-			COALESCE(SUM(CASE WHEN payment_method = 'qris' THEN total_amount ELSE 0 END),0) AS qris,
+			
+			COALESCE(SUM(CASE WHEN payment_method = 'cash' AND status = 'done' THEN total_amount ELSE 0 END),0) AS cash,
+			COALESCE(SUM(CASE WHEN payment_method = 'transfer' AND status = 'done' THEN total_amount ELSE 0 END),0) AS transfer,
+			COALESCE(SUM(CASE WHEN payment_method = 'qris' AND status = 'done' THEN total_amount ELSE 0 END),0) AS qris,
 
 			COALESCE(SUM(CASE WHEN payment_method = 'cash' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS cash_cancelled,
 			COALESCE(SUM(CASE WHEN payment_method = 'transfer' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS transfer_cancelled,
 			COALESCE(SUM(CASE WHEN payment_method = 'qris' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS qris_cancelled
 		`).
-		Where("status = ?", "done").
 		Where("shift_id = ?", shiftID).
 		Where("store_id = ?", storeID).
 		Scan(&res).Error
