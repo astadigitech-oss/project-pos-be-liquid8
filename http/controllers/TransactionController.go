@@ -538,6 +538,8 @@ func CheckoutTransaction(c *gin.Context) {
         // Tax float64 `json:"tax" binding:"gte=0,max=100"`
         PaymentMethod string `json:"payment_method" binding:"required,oneof=cash transfer qris"`
         PaidAmount float64 `json:"paid_amount" binding:"required,gte=0"`
+        PlasticQty uint `json:"plastic_qty"`
+        PlasticUnitPrice float64 `json:"plastic_unit_price"`
     }
 
     var p payload
@@ -634,6 +636,8 @@ func CheckoutTransaction(c *gin.Context) {
         PaidAmount: p.PaidAmount,
         PaymentMethod: p.PaymentMethod,
         Status: "done",
+        PlasticQty: p.PlasticQty,
+        PlasticUnitPrice: p.PlasticUnitPrice,
         CreatedAt: now.UTC(),
         UpdatedAt: now.UTC(),
     }
@@ -700,7 +704,7 @@ func CheckoutTransaction(c *gin.Context) {
     }
 
     ppnAmount := math.Round(subTotal * (ppn.Ppn / 100))
-	totalTransaction := math.Round(subTotal + ppnAmount)
+	totalTransaction := math.Round(subTotal + ppnAmount + (float64(p.PlasticQty) * p.PlasticUnitPrice))
     totalAmount := helpers.RoundTo500(int(totalTransaction))
     roundedPrice := totalAmount - totalTransaction
 	changeAmount := tr.PaidAmount - totalAmount
@@ -782,6 +786,8 @@ func CheckoutTransaction(c *gin.Context) {
         "customer_name": member.Name,
         "total_item": tr.TotalItem,
         "total_quantity": tr.TotalQuantity,
+        "plastic_qty": tr.PlasticQty,
+        "plastic_unit_price": tr.PlasticUnitPrice,
         "paid_amount": tr.PaidAmount,
         "change_amount": tr.ChangeAmount,
         "payment_method": tr.PaymentMethod,
@@ -929,6 +935,8 @@ func DetailTransaction(c *gin.Context) {
         CustomerName string `json:"customer_name"`       
         TotalItem    int     `json:"total_item"`
         TotalQuantity int     `json:"total_quantity"`
+        PlasticQty uint     `json:"plastic_qty"`
+        PlasticUnitPrice float64 `json:"plastic_unit_price"`
         PaidAmount float64 `json:"paid_amount"`
         ChangeAmount float64 `json:"change_amount"`
         PaymentMethod string  `json:"payment_method"`
@@ -937,6 +945,7 @@ func DetailTransaction(c *gin.Context) {
         TotalAmount  float64 `json:"total_amount"`
         Status string `json:"status"`
         CreatedAt time.Time  `json:"created_at"`
+        Note string `json:"note"`
         Store struct {
             Name string `json:"name"`
             Phone string `json:"phone"`
@@ -971,6 +980,8 @@ func DetailTransaction(c *gin.Context) {
     result.CustomerName = tx.Member.Name
     result.TotalItem = tx.TotalItem
     result.TotalQuantity = tx.TotalQuantity
+    result.PlasticQty = tx.PlasticQty
+    result.PlasticUnitPrice = tx.PlasticUnitPrice
     result.PaidAmount = tx.PaidAmount
     result.ChangeAmount = tx.ChangeAmount
     result.PaymentMethod = tx.PaymentMethod
@@ -979,6 +990,7 @@ func DetailTransaction(c *gin.Context) {
     result.RoundedPrice = tx.RoundedPrice
     result.Status = tx.Status
     result.CreatedAt = tx.CreatedAt
+    result.Note = tx.Note
     
     result.Store.Name = tx.Store.StoreName
     result.Store.Phone = tx.Store.Phone
@@ -1237,6 +1249,7 @@ func DetailTransactionsShift(c *gin.Context) {
     c.JSON(http.StatusOK, response.Success("Detail Transaction Shift", result))
 }
 func CancelTransaction(c *gin.Context) {
+    user := c.MustGet("auth_user").(models.User)
     txIDParam := c.Param("id")
     txID, err := strconv.ParseUint(txIDParam, 10, 64)
     if err != nil { 
@@ -1244,80 +1257,276 @@ func CancelTransaction(c *gin.Context) {
         return 
     }
 
+    type payload struct {
+        Note string `json:"note" binding:"required"`
+    }
+
+    var p payload
+    if err := c.ShouldBindJSON(&p); err != nil {
+		ve, ok := err.(validator.ValidationErrors)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Format JSON tidak valid"})
+			return
+		}
+
+		errorsMap := make(map[string]string)
+		for _, e := range ve {
+			switch e.Field() {
+			case "Note":
+				if e.Tag() == "required" {
+					errorsMap["note"] = "Catatan pembatalan wajib diisi"
+				}
+			default:
+				errorsMap[e.Field()] = "Validasi gagal"
+			}
+		}
+
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "Validasi gagal", "errors": errorsMap})
+		return
+	}
+
+// LOAD TRANSACTION
     var tr models.Transaction
     if err := config.DB.Preload("Items").First(&tr, txID).Error; err != nil {
         helpers.ErrorResponse(c, 404, "Transaction not found", err)
         return
     }
-
     if tr.Status != "done" {
         helpers.ErrorResponse(c, 422, "Only done transactions can be cancelled", nil)
         return
     }
 
-    // check shift
+// CHECK SHIFT
     var shift models.Shift
     if err := config.DB.First(&shift, tr.ShiftID).Error; err != nil { 
         helpers.ErrorResponse(c, 500, "Failed to load shift", err); 
         return 
     }
-    if shift.Status != "open" { 
-        helpers.ErrorResponse(c, 422, "Shift already closed; cannot cancel transaction", nil); 
-        return 
+    // jika user role kasir, pastikan shift masih open
+    if user.Role == "kasir" {        
+        if shift.Status != "open" { 
+            helpers.ErrorResponse(c, 422, "Shift already closed; cannot cancel transaction", nil); 
+            return 
+        }
     }
 
-    // rollback transaction: mark transaction cancelled, restore product statuses, etc.
+//UPDATE TRANSACTION STATUS
     dbTx := config.DB.WithContext(c.Request.Context()).Begin()
-    if err := dbTx.Model(&tr).Update("status", "cancelled").Error; err != nil { 
+    updates := map[string]interface{}{
+        "status": "cancelled",
+        "note": p.Note,
+        "cancelled_by": user.ID,
+    }
+    // jika user kasir, set status pending_cancel untuk menunggu approval admin
+    if user.Role == "kasir" {
+        updates["status"] = "pending_cancel"
+    }
+    if err := dbTx.Model(&tr).Updates(updates).Error; err != nil { 
         dbTx.Rollback(); 
         helpers.ErrorResponse(c, 500, "Failed to cancel tx", err); 
         return 
     }
 
-    // restore products
-    for _, item := range tr.Items {
-        if err := dbTx.Model(&models.Product{}).Where("id = ?", item.ProductID).Update("status", "display").Error; err != nil { 
-            dbTx.Rollback(); 
-            helpers.ErrorResponse(c, 500, "Failed to restore product", err); 
-            return 
+// JIKA BUKAN KASIR, MAKA LANGSUNG PROSES PEMBATALAN
+    if user.Role != "kasir"{
+        // restore products
+        for _, item := range tr.Items {
+            if err := dbTx.Model(&models.Product{}).Where("id = ?", item.ProductID).Update("status", "display").Error; err != nil { 
+                dbTx.Rollback(); 
+                helpers.ErrorResponse(c, 500, "Failed to restore product", err); 
+                return 
+            }
+        }
+        //jika shift sudah closed, lakukan recalculate summary shift
+        if shift.Status == "closed" {
+            summary, err := helpers.RecalculateTransactionShift(dbTx, tr.StoreID, shift.ID)
+            if err != nil {
+                helpers.ErrorResponse(c, 422, "Recalculate summary transaction shift failed", err)
+                return
+            }
+
+            ExpectedAmount := shift.InitialCash + summary["total_amount"].(float64)
+            ExpectedCash := summary["cash"].(float64) + shift.InitialCash
+            diff := shift.ActualCash - ExpectedCash
+
+            updates := map[string]interface{}{
+                "total_cash": summary["cash"].(float64),
+                "total_transfer": summary["transfer"].(float64),
+                "total_qris": summary["qris"].(float64),
+                "total_tax": summary["tax_amount"].(float64),
+
+                "subtotal": summary["subtotal"].(float64),
+                "expected_amount": ExpectedAmount,
+                "difference": diff,
+            }
+
+            if err := config.DB.Model(&shift).Updates(updates).Error; err != nil {
+                helpers.ErrorResponse(c, 500, "Failed to close shift", err)
+                return
+            }
+        }else {  
+            //jika masih open, langsung update dengan cara decrement 
+            var cash, transfer, qris float64
+            switch tr.PaymentMethod {
+            case "cash":
+                cash = tr.TotalAmount
+            case "transfer":
+                transfer = tr.TotalAmount
+            case "qris":
+                qris = tr.TotalAmount
+            }         
+            if err := dbTx.Model(&models.Shift{}).
+                Where("id = ?", shift.ID).
+                Updates(map[string]interface{}{
+                    "total_cash":     gorm.Expr("total_cash - ?", cash),
+                    "total_transfer": gorm.Expr("total_transfer - ?", transfer),
+                    "total_qris":     gorm.Expr("total_qris - ?", qris),
+                    "total_tax":      gorm.Expr("total_tax - ?", tr.TaxPrice),
+                    "subtotal":       gorm.Expr("subtotal - ?", tr.Subtotal),
+                    "expected_amount": gorm.Expr("expected_amount - ?", tr.TotalAmount),
+                }).Error; err != nil {
+        
+                dbTx.Rollback()
+                helpers.ErrorResponse(c, 500, "Update shift gagal", err)
+                return
+            }
         }
     }
 
-    // INCREMENTAL SHIFT UPDATE
-    var cash, transfer, qris float64
-	switch tr.PaymentMethod {
-	case "cash":
-		cash = tr.TotalAmount
-	case "transfer":
-		transfer = tr.TotalAmount
-	case "qris":
-		qris = tr.TotalAmount
-	}
-
-	if err := dbTx.Model(&models.Shift{}).
-		Where("id = ?", shift.ID).
-		Updates(map[string]interface{}{
-			"total_cash":     gorm.Expr("total_cash - ?", cash),
-			"total_transfer": gorm.Expr("total_transfer - ?", transfer),
-			"total_qris":     gorm.Expr("total_qris - ?", qris),
-			"total_tax":      gorm.Expr("total_tax - ?", tr.TaxPrice),
-			"subtotal":       gorm.Expr("subtotal - ?", tr.Subtotal),
-			"expected_amount": gorm.Expr("expected_amount - ?", tr.TotalAmount),
-		}).Error; err != nil {
-
-		dbTx.Rollback()
-		helpers.ErrorResponse(c, 500, "Update shift gagal", err)
-		return
-	}
-
+// COMMIT TRANSACTION
     if err := dbTx.Commit().Error; err != nil { 
         helpers.ErrorResponse(c, 500, "Commit failed", err); 
         return 
     }
 
-    c.JSON(http.StatusOK, response.Success("Transaction cancelled", tr))
+    c.JSON(http.StatusOK, response.Success("Transaction cancellation request sent successfully", tr))
 }
 //ADMIN
+func ApprovalCancelTransaction(c *gin.Context) {  
+    txIDParam := c.Param("id")
+    txID, err := strconv.ParseUint(txIDParam, 10, 64)
+    if err != nil {
+        helpers.ErrorResponse(c, 400, "Invalid transaction id", err)
+        return
+    }
+    type payload struct {
+        ApproveStatus string `json:"approve_status" binding:"required,oneof=approved rejected"`
+    }
+
+    var p payload
+    if err := c.ShouldBindJSON(&p); err != nil {
+		ve, ok := err.(validator.ValidationErrors)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Format JSON tidak valid"})
+			return
+		}
+
+		errorsMap := make(map[string]string)
+		for _, e := range ve {
+			switch e.Field() {
+			case "Note":
+                errorsMap["approve_status"] = "Status approval wajib diisi dan harus bernilai 'approved' atau 'rejected'"
+			default:
+				errorsMap[e.Field()] = "Validasi gagal"
+			}
+		}
+
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "Validasi gagal", "errors": errorsMap})
+		return
+	}
+
+// LOAD TRANSACTION
+    var tr models.Transaction
+    if err := config.DB.Preload("Items").First(&tr, txID).Error; err != nil {
+        helpers.ErrorResponse(c, 404, "Transaction not found", err)
+        return
+    }
+    if tr.Status != "pending_cancel" {
+        helpers.ErrorResponse(c, 422, "Only pending cancel transactions can be prosecced", nil)
+        return
+    }
+
+// CHECK SHIFT
+    var shift models.Shift
+    if err := config.DB.First(&shift, tr.ShiftID).Error; err != nil { 
+        helpers.ErrorResponse(c, 500, "Failed to load shift", err); 
+        return 
+    }
+
+// UPDATE STATUS
+    dbTx := config.DB.WithContext(c.Request.Context()).Begin()
+    status := "done"
+    if p.ApproveStatus == "approved" {
+        status = "cancelled"
+        if shift.Status == "closed" {
+            summary, err := helpers.RecalculateTransactionShift(dbTx, tr.StoreID, shift.ID)
+            if err != nil {
+                helpers.ErrorResponse(c, 422, "Recalculate summary transaction shift failed", err)
+                return
+            }
+
+            ExpectedAmount := shift.InitialCash + summary["total_amount"].(float64)
+            ExpectedCash := summary["cash"].(float64) + shift.InitialCash
+            diff := shift.ActualCash - ExpectedCash
+
+            updates := map[string]interface{}{
+                "total_cash": summary["cash"].(float64),
+                "total_transfer": summary["transfer"].(float64),
+                "total_qris": summary["qris"].(float64),
+                "total_tax": summary["tax_amount"].(float64),
+
+                "subtotal": summary["subtotal"].(float64),
+                "expected_amount": ExpectedAmount,
+                "difference": diff,
+            }
+
+            if err := config.DB.Model(&shift).Updates(updates).Error; err != nil {
+                helpers.ErrorResponse(c, 500, "Failed to close shift", err)
+                return
+            }
+        }else {  
+            //jika masih open, langsung update dengan cara decrement 
+            var cash, transfer, qris float64
+            switch tr.PaymentMethod {
+            case "cash":
+                cash = tr.TotalAmount
+            case "transfer":
+                transfer = tr.TotalAmount
+            case "qris":
+                qris = tr.TotalAmount
+            }         
+            if err := dbTx.Model(&models.Shift{}).
+                Where("id = ?", shift.ID).
+                Updates(map[string]interface{}{
+                    "total_cash":     gorm.Expr("total_cash - ?", cash),
+                    "total_transfer": gorm.Expr("total_transfer - ?", transfer),
+                    "total_qris":     gorm.Expr("total_qris - ?", qris),
+                    "total_tax":      gorm.Expr("total_tax - ?", tr.TaxPrice),
+                    "subtotal":       gorm.Expr("subtotal - ?", tr.Subtotal),
+                    "expected_amount": gorm.Expr("expected_amount - ?", tr.TotalAmount),
+                }).Error; err != nil {
+        
+                dbTx.Rollback()
+                helpers.ErrorResponse(c, 500, "Update shift gagal", err)
+                return
+            }
+        }
+    }
+    //update transaction status
+    if err := dbTx.Model(&tr).Update("status", status).Error; err != nil {
+        dbTx.Rollback()
+        helpers.ErrorResponse(c, 500, "Failed to update transaction status", err)
+        return
+    }
+
+// COMMIT TRANSACTION
+    if err := dbTx.Commit().Error; err != nil { 
+        helpers.ErrorResponse(c, 500, "Commit failed", err); 
+        return 
+    }
+
+    c.JSON(http.StatusOK, response.Success("Transaction cancellation request sent successfully", tr))
+}
 func GetAllTransactions(c *gin.Context) {
     store_id := strings.TrimSpace(c.DefaultQuery("store_id", ""))
     q := strings.TrimSpace(c.DefaultQuery("q", ""))

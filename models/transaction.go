@@ -12,6 +12,8 @@ type Transaction struct {
 	Invoice string `json:"invoice" gorm:"unique;size:25;not null"`
 	TotalItem     int `json:"total_item" gorm:"default:0;"`
 	TotalQuantity int `json:"total_quantity" gorm:"default:0"`
+	PlasticQty uint `json:"plastic_qty" gorm:"default:0"`
+	PlasticUnitPrice     float64 `json:"plastic_unit_price" gorm:"type:decimal(18,2);default:0"`
 	MemberPoint   int `json:"member_point" gorm:"default:0"`
 	Subtotal     float64 `json:"subtotal" gorm:"type:decimal(18,2);default:0"`
 	Tax          float64 `json:"tax" gorm:"type:decimal(18,2);default:0"`
@@ -22,11 +24,14 @@ type Transaction struct {
 	PaidAmount   float64 `json:"paid_amount" gorm:"type:decimal(18,2);default:0"`
 	ChangeAmount float64 `json:"change_amount" gorm:"type:decimal(18,2);default:0"`
 	PaymentMethod string `json:"payment_method" gorm:"type:enum('cash','transfer','qris')"`
-	Status        string `json:"status" gorm:"type:enum('pending','cancelled','done');default:'pending'"`
+	Status        string `json:"status" gorm:"type:enum('pending_cancel','cancelled','done');default:'pending'"`
+	CancelledBy   *uint64 `json:"cancelled_by" gorm:"index"`
+	Note  string `json:"note" gorm:"size:255"`
 
 	//relation
 	Store   *StoreProfile `gorm:"foreignKey:StoreID;references:ID" json:"store,omitempty"`
 	User   *User `gorm:"foreignKey:UserID;references:ID" json:"user,omitempty"`
+	UserCancel   *User `gorm:"foreignKey:UserID;references:ID" json:"user_cancel,omitempty"`
 	Member   *Member `gorm:"foreignKey:MemberID;references:ID" json:"member,omitempty"`
 	Items []TransactionItem `json:"items,omitempty" gorm:"foreignKey:TransactionID;references:ID"`
 
