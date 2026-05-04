@@ -72,7 +72,7 @@ func AddToCart(c *gin.Context) {
     // load product
     var product models.Product
     if err := config.DB.Where("barcode = ? AND store_id = ? AND deleted_at IS NULL", p.ProductBarcode, storeID).First(&product).Error; err != nil {
-        helpers.ErrorResponse(c, 404, "Product tidak ditemukan", err)
+        helpers.ErrorResponse(c, 404, fmt.Sprintf("Product tidak ditemukan %s", p.ProductBarcode), err)
         return
     }
 
@@ -387,11 +387,29 @@ func GetCurrentCart(c *gin.Context) {
         return     
     }
 
+    type txRowPriceModel struct {
+        Name string `json:"name"`
+        Price     float64  `json:"price"`
+        Quantity    int64 `json:"quantity"`
+        Total    float64 `json:"total"`
+    }
     var totalSubtotal, totalAmount float64
     var totalQuantity int64
+    priceMap := make(map[float64]int64)
     for _, it := range items {
         totalSubtotal += it.Subtotal
         totalQuantity += it.Quantity
+        priceMap[it.Price] += 1
+    }
+
+    var itemsPrice []txRowPriceModel
+    for price, qty := range priceMap {
+        itemsPrice = append(itemsPrice, txRowPriceModel{
+            Name: formatPriceToProductName(price),
+            Price:    price,
+            Quantity: qty,
+            Total: price * float64(qty),
+        })
     }
 
     ppn_price := math.Round(totalSubtotal * (ppn.Ppn / 100))
@@ -400,7 +418,8 @@ func GetCurrentCart(c *gin.Context) {
     pembulatan := totalAmount - totalBelanja
 
     payload := gin.H{
-        "items": items,
+        "products": items,
+        "items": itemsPrice,
         "subtotal": totalSubtotal,
         "ppn": gin.H{
             "tax": ppn.Ppn,
@@ -651,16 +670,12 @@ func CheckoutTransaction(c *gin.Context) {
     totalQty := 0
 	subTotal := float64(0)
     
-    // type txRowModel struct {
-    //     Name     string  `json:"product_name"`
-    //     Price    float64 `json:"price"`
-    // }
     type txRowPriceModel struct {
+        Name string `json:"name"`
         Price     float64  `json:"price"`
         Quantity    int64 `json:"quantity"`
         Total    float64 `json:"total"`
     }
-    // var txRow []txRowModel
     priceMap := make(map[float64]int64)
     var productIDs []uint64
     // migrate items
@@ -697,6 +712,7 @@ func CheckoutTransaction(c *gin.Context) {
     var txRowPrice []txRowPriceModel
     for price, qty := range priceMap {
         txRowPrice = append(txRowPrice, txRowPriceModel{
+            Name: formatPriceToProductName(price),
             Price:    price,
             Quantity: qty,
             Total: price * float64(qty),
@@ -922,6 +938,7 @@ func DetailTransaction(c *gin.Context) {
     }
     
     type transactionItemPrice struct {
+        Name string `json:"name"`
         Price    float64 `json:"price"`
         Quantity int64   `json:"quantity"`
         Total float64   `json:"total"`
@@ -1019,30 +1036,21 @@ func DetailTransaction(c *gin.Context) {
     }
 
     // gourp item by price
-    var itemsPrice []transactionItemPrice
-    queryItemsPrice := `
-        SELECT
-            price,
-            quantity,
-            price * quantity as total
-        FROM (
-            SELECT
-                ti.price,
-                COUNT(*) as quantity
-            FROM transaction_items ti
-            WHERE ti.transaction_id = ?
-            GROUP BY ti.price
-        ) t
-        ORDER BY price ASC
-    `
-
-    if err := config.DB.Raw(queryItemsPrice, id).Scan(&itemsPrice).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "Failed group items transaction", err)
-        return
+    priceMap := make(map[float64]int64)
+    for _, it := range items {
+        priceMap[it.Price] += it.Quantity
+    }
+    for price, qty := range priceMap {
+        result.Items = append(result.Items, transactionItemPrice{
+            Name: formatPriceToProductName(price),
+            Price:    price,
+            Quantity: qty,
+            Total: price * float64(qty),
+        })
     }
 
     result.Products = items
-    result.Items = itemsPrice
+    // result.Items = itemsPrice
 
     c.JSON(http.StatusOK, gin.H{
         "success":  true,
@@ -1624,4 +1632,24 @@ func GetAllTransactions(c *gin.Context) {
             "pagination": pagination,
         },
     })
+}
+
+
+//==================== Helper Function ====================
+func formatPriceToProductName(price float64) string {
+	// bulatkan dulu biar aman dari float
+	p := int(math.Round(price))
+
+	ribu := p / 1000
+	sisa := p % 1000
+
+	if ribu > 0 && sisa > 0 {
+		return fmt.Sprintf("Produk %d Ribu %d Rupiah", ribu, sisa)
+	}
+
+	if ribu > 0 {
+		return fmt.Sprintf("Produk %d Ribu", ribu)
+	}
+
+	return fmt.Sprintf("Produk %d Rupiah", sisa)
 }
