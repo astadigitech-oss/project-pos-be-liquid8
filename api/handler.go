@@ -131,7 +131,8 @@ func RouteHandler(r *gin.Engine) {
 			// TRANSACTION
 			//========================================
 			rg.GET("transactions/all", controllers.GetAllTransactions) //TransactionController.go
-			rg.GET("transactions/:id/approve-cancel", controllers.ApprovalCancelTransaction) //TransactionController.go
+			rg.GET("transactions/pending-cancel", controllers.GetPendingCancelTransactions) //TransactionController.go
+			rg.POST("transactions/:id/approve-cancel", controllers.ApprovalCancelTransaction) //TransactionController.go
 
 			//========================================
 			// SHIFT

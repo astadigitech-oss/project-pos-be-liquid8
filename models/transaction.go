@@ -24,7 +24,7 @@ type Transaction struct {
 	PaidAmount   float64 `json:"paid_amount" gorm:"type:decimal(18,2);default:0"`
 	ChangeAmount float64 `json:"change_amount" gorm:"type:decimal(18,2);default:0"`
 	PaymentMethod string `json:"payment_method" gorm:"type:enum('cash','transfer','qris')"`
-	Status        string `json:"status" gorm:"type:enum('pending_cancel','cancelled','done');default:'pending'"`
+	Status        string `json:"status" gorm:"type:enum('pending_cancel','cancelled','done');default:'done'"`
 	CancelledBy   *uint64 `json:"cancelled_by" gorm:"index"`
 	Note  string `json:"note" gorm:"size:255"`
 

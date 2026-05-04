@@ -1300,7 +1300,7 @@ func CancelTransaction(c *gin.Context) {
         return
     }
     if tr.Status != "done" {
-        helpers.ErrorResponse(c, 422, "Only done transactions can be cancelled", nil)
+        helpers.ErrorResponse(c, 422, "Only done transactions can be processed", nil)
         return
     }
 
@@ -1338,66 +1338,43 @@ func CancelTransaction(c *gin.Context) {
 // JIKA BUKAN KASIR, MAKA LANGSUNG PROSES PEMBATALAN
     if user.Role != "kasir"{
         // restore products
+        productIDs := make([]uint64, 0)
         for _, item := range tr.Items {
-            if err := dbTx.Model(&models.Product{}).Where("id = ?", item.ProductID).Update("status", "display").Error; err != nil { 
-                dbTx.Rollback(); 
-                helpers.ErrorResponse(c, 500, "Failed to restore product", err); 
-                return 
-            }
+            productIDs = append(productIDs, item.ProductID)
         }
-        //jika shift sudah closed, lakukan recalculate summary shift
+        if err := dbTx.Model(&models.Product{}).Where("id IN ?", productIDs).Update("status", "display").Error; err != nil { 
+            dbTx.Rollback(); 
+            helpers.ErrorResponse(c, 500, "Failed to restore product status", err); 
+            return 
+        }
+        //lakukan recalculate summary shift
+        summary, err := helpers.RecalculateTransactionShift(dbTx, tr.StoreID, shift.ID)
+        if err != nil {
+            helpers.ErrorResponse(c, 422, "Recalculate summary transaction shift failed", err)
+            return
+        }
+
+        ExpectedAmount := shift.InitialCash + summary["total_amount"].(float64)
+        ExpectedCash := summary["cash"].(float64) + shift.InitialCash
+        diff := shift.ActualCash - ExpectedCash
+
+        updates := map[string]interface{}{
+            "total_cash": summary["cash"].(float64),
+            "total_transfer": summary["transfer"].(float64),
+            "total_qris": summary["qris"].(float64),
+            "total_tax": summary["tax_amount"].(float64),
+
+            "subtotal": summary["subtotal"].(float64),
+            "expected_amount": ExpectedAmount,
+        }
+
         if shift.Status == "closed" {
-            summary, err := helpers.RecalculateTransactionShift(dbTx, tr.StoreID, shift.ID)
-            if err != nil {
-                helpers.ErrorResponse(c, 422, "Recalculate summary transaction shift failed", err)
-                return
-            }
+            updates["difference"] = diff
+        }
 
-            ExpectedAmount := shift.InitialCash + summary["total_amount"].(float64)
-            ExpectedCash := summary["cash"].(float64) + shift.InitialCash
-            diff := shift.ActualCash - ExpectedCash
-
-            updates := map[string]interface{}{
-                "total_cash": summary["cash"].(float64),
-                "total_transfer": summary["transfer"].(float64),
-                "total_qris": summary["qris"].(float64),
-                "total_tax": summary["tax_amount"].(float64),
-
-                "subtotal": summary["subtotal"].(float64),
-                "expected_amount": ExpectedAmount,
-                "difference": diff,
-            }
-
-            if err := config.DB.Model(&shift).Updates(updates).Error; err != nil {
-                helpers.ErrorResponse(c, 500, "Failed to close shift", err)
-                return
-            }
-        }else {  
-            //jika masih open, langsung update dengan cara decrement 
-            var cash, transfer, qris float64
-            switch tr.PaymentMethod {
-            case "cash":
-                cash = tr.TotalAmount
-            case "transfer":
-                transfer = tr.TotalAmount
-            case "qris":
-                qris = tr.TotalAmount
-            }         
-            if err := dbTx.Model(&models.Shift{}).
-                Where("id = ?", shift.ID).
-                Updates(map[string]interface{}{
-                    "total_cash":     gorm.Expr("total_cash - ?", cash),
-                    "total_transfer": gorm.Expr("total_transfer - ?", transfer),
-                    "total_qris":     gorm.Expr("total_qris - ?", qris),
-                    "total_tax":      gorm.Expr("total_tax - ?", tr.TaxPrice),
-                    "subtotal":       gorm.Expr("subtotal - ?", tr.Subtotal),
-                    "expected_amount": gorm.Expr("expected_amount - ?", tr.TotalAmount),
-                }).Error; err != nil {
-        
-                dbTx.Rollback()
-                helpers.ErrorResponse(c, 500, "Update shift gagal", err)
-                return
-            }
+        if err := config.DB.Model(&shift).Updates(updates).Error; err != nil {
+            helpers.ErrorResponse(c, 500, "Failed to update summary shift", err)
+            return
         }
     }
 
@@ -1450,7 +1427,7 @@ func ApprovalCancelTransaction(c *gin.Context) {
         return
     }
     if tr.Status != "pending_cancel" {
-        helpers.ErrorResponse(c, 422, "Only pending cancel transactions can be prosecced", nil)
+        helpers.ErrorResponse(c, 422, "Only pending cancel transactions can be processed", nil)
         return
     }
 
@@ -1461,63 +1438,52 @@ func ApprovalCancelTransaction(c *gin.Context) {
         return 
     }
 
-// UPDATE STATUS
+// START TRANSACTION
     dbTx := config.DB.WithContext(c.Request.Context()).Begin()
     status := "done"
+
+    // jika approved, maka update status transaction menjadi cancelled dan lakukan penyesuaian shift
     if p.ApproveStatus == "approved" {
         status = "cancelled"
-        if shift.Status == "closed" {
-            summary, err := helpers.RecalculateTransactionShift(dbTx, tr.StoreID, shift.ID)
-            if err != nil {
-                helpers.ErrorResponse(c, 422, "Recalculate summary transaction shift failed", err)
-                return
-            }
-
-            ExpectedAmount := shift.InitialCash + summary["total_amount"].(float64)
-            ExpectedCash := summary["cash"].(float64) + shift.InitialCash
-            diff := shift.ActualCash - ExpectedCash
-
-            updates := map[string]interface{}{
-                "total_cash": summary["cash"].(float64),
-                "total_transfer": summary["transfer"].(float64),
-                "total_qris": summary["qris"].(float64),
-                "total_tax": summary["tax_amount"].(float64),
-
-                "subtotal": summary["subtotal"].(float64),
-                "expected_amount": ExpectedAmount,
-                "difference": diff,
-            }
-
-            if err := config.DB.Model(&shift).Updates(updates).Error; err != nil {
-                helpers.ErrorResponse(c, 500, "Failed to close shift", err)
-                return
-            }
-        }else {  
-            //jika masih open, langsung update dengan cara decrement 
-            var cash, transfer, qris float64
-            switch tr.PaymentMethod {
-            case "cash":
-                cash = tr.TotalAmount
-            case "transfer":
-                transfer = tr.TotalAmount
-            case "qris":
-                qris = tr.TotalAmount
-            }         
-            if err := dbTx.Model(&models.Shift{}).
-                Where("id = ?", shift.ID).
-                Updates(map[string]interface{}{
-                    "total_cash":     gorm.Expr("total_cash - ?", cash),
-                    "total_transfer": gorm.Expr("total_transfer - ?", transfer),
-                    "total_qris":     gorm.Expr("total_qris - ?", qris),
-                    "total_tax":      gorm.Expr("total_tax - ?", tr.TaxPrice),
-                    "subtotal":       gorm.Expr("subtotal - ?", tr.Subtotal),
-                    "expected_amount": gorm.Expr("expected_amount - ?", tr.TotalAmount),
-                }).Error; err != nil {
         
-                dbTx.Rollback()
-                helpers.ErrorResponse(c, 500, "Update shift gagal", err)
-                return
-            }
+        // restore products
+        productIDs := make([]uint64, 0)
+        for _, item := range tr.Items {
+            productIDs = append(productIDs, item.ProductID)
+        }
+        if err := dbTx.Model(&models.Product{}).Where("id IN ?", productIDs).Update("status", "display").Error; err != nil { 
+            dbTx.Rollback(); 
+            helpers.ErrorResponse(c, 500, "Failed to restore product status", err); 
+            return 
+        }
+        //lakukan recalculate summary shift
+        summary, err := helpers.RecalculateTransactionShift(dbTx, tr.StoreID, shift.ID)
+        if err != nil {
+            helpers.ErrorResponse(c, 422, "Recalculate summary transaction shift failed", err)
+            return
+        }
+
+        ExpectedAmount := shift.InitialCash + summary["total_amount"].(float64)
+        ExpectedCash := summary["cash"].(float64) + shift.InitialCash
+        diff := shift.ActualCash - ExpectedCash
+
+        updates := map[string]interface{}{
+            "total_cash": summary["cash"].(float64),
+            "total_transfer": summary["transfer"].(float64),
+            "total_qris": summary["qris"].(float64),
+            "total_tax": summary["tax_amount"].(float64),
+
+            "subtotal": summary["subtotal"].(float64),
+            "expected_amount": ExpectedAmount,
+        }
+
+        if shift.Status == "closed" {
+            updates["difference"] = diff
+        }
+
+        if err := config.DB.Model(&shift).Updates(updates).Error; err != nil {
+            helpers.ErrorResponse(c, 500, "Failed to update summary shift", err)
+            return
         }
     }
     //update transaction status
@@ -1533,7 +1499,105 @@ func ApprovalCancelTransaction(c *gin.Context) {
         return 
     }
 
-    c.JSON(http.StatusOK, response.Success("Transaction cancellation request sent successfully", tr))
+    c.JSON(http.StatusOK, response.Success("Transaction cancelled successfully", tr))
+}
+func GetPendingCancelTransactions(c *gin.Context) {
+    store_id := strings.TrimSpace(c.DefaultQuery("store_id", ""))
+    q := strings.TrimSpace(c.DefaultQuery("q", ""))
+    page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
+    if page < 1 { page = 1 }
+    offset := (page-1)*limit
+
+    var store models.StoreProfile
+
+    type txRow struct {
+        ID uint64 `json:"id"`
+        Invoice string `json:"invoice"`
+        TotalItem int `json:"total_item"`
+        TotalQuantity int `json:"total_quantity"`
+        CustomerName string `json:"customer_name"`
+        // Kasir string `json:"kasir"`
+        StoreName string `json:"store_name"`
+        Subtotal float64 `json:"subtotal"`
+        Tax float64 `json:"tax"`
+        TotalAmount float64 `json:"total_amount"`
+        Status string `json:"status"`
+        PaymentMethod string `json:"payment_method"`
+        CreatedAt time.Time `json:"created_at"`
+    }
+
+    var rows []txRow
+
+    baseWhere := "WHERE 1=1 AND t.status = 'pending_cancel'"
+    args := []interface{}{}
+
+    if store_id != "" {
+        storeID, _ := strconv.Atoi(store_id)
+        if err := config.DB.First(&store, storeID).Error; err != nil {
+            helpers.ErrorResponse(c, 404, "store not found", err)
+            return
+        }
+
+        baseWhere += " AND t.store_id = ?"
+        args = append(args, store.ID)
+    }
+
+    if q != "" {
+        like := "%"+q+"%"
+        baseWhere += " AND (t.invoice LIKE ? OR m.name LIKE ? OR s.store_name LIKE ?)"
+        args = append(args, like, like, like, like)
+    }
+
+    var total int64
+    countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM transactions t LEFT JOIN users u ON u.id = t.user_id LEFT JOIN members m ON m.id = t.member_id LEFT JOIN store_profiles s ON s.id = t.store_id LEFT JOIN shifts sh ON sh.id = t.shift_id %s`, baseWhere)
+    if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to count transactions", err)
+        return
+    }
+
+    dataSQL := fmt.Sprintf(`
+        SELECT
+            t.id,
+            t.invoice,
+            t.total_item,
+            t.total_quantity,
+            COALESCE(m.name, '') AS customer_name,
+            COALESCE(s.store_name, '') AS store_name,
+            t.subtotal,
+            COALESCE(t.tax_price, 0) AS tax,
+            t.total_amount,
+            t.status,
+            t.payment_method,
+            t.created_at
+        FROM transactions t
+        LEFT JOIN members m ON m.id = t.member_id
+        LEFT JOIN store_profiles s ON s.id = t.store_id
+        %s
+        ORDER BY t.created_at DESC
+        LIMIT ? OFFSET ?`, baseWhere)
+
+    args = append(args, limit, offset)
+    if err := config.DB.Raw(dataSQL, args...).Scan(&rows).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to fetch transactions", err)
+        return
+    }
+
+    lastPage := int(math.Ceil(float64(total)/float64(limit)))
+    pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(total))
+
+    for i := range rows {
+        rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, "Asia/Jakarta")
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "success": true,
+        "message": "List semua transaksi",
+        "resource": gin.H{
+            "data": rows,
+            "pagination": pagination,
+        },
+    })
 }
 func GetAllTransactions(c *gin.Context) {
     store_id := strings.TrimSpace(c.DefaultQuery("store_id", ""))
@@ -1563,7 +1627,7 @@ func GetAllTransactions(c *gin.Context) {
 
     var rows []txRow
 
-    baseWhere := "WHERE 1=1"
+    baseWhere := "WHERE 1=1 AND t.status IN ('done', 'cancelled')"
     args := []interface{}{}
 
     if store_id != "" {
