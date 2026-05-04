@@ -1,10 +1,12 @@
 package main
 
 import (
+	"math/rand"
 	"fmt"
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"liquid8/pos/config"
 	"liquid8/pos/helpers"
@@ -246,13 +248,18 @@ func seedUsers(db *gorm.DB) error {
 }
 func seedProduct(db *gorm.DB) error {
 	// seed 100 dummy products
+	rand.Seed(time.Now().UnixNano())
 	var products []models.Product
 	for j := 1; j <= 10; j++ {
 		for i := 1; i <= 50; i++ {
 			// distribute stores 1..10
 			storeID := uint64(j)
-			barcode := fmt.Sprintf("P%d%06d", j, i)
-			price := float64(10000 + (i * 250))
+			barcode := fmt.Sprintf("P%d%s", j, helpers.RandomString(5))
+			prices := []float64{12000, 24000, 12000, 24000}
+			index := rand.Intn(len(prices))
+			price := prices[index]
+			colors := []string{"Kuning", "Merah", "Small", "Big"}
+			color := colors[index]
 	
 			p := models.Product{
 				StoreID:     storeID,
@@ -261,7 +268,7 @@ func seedProduct(db *gorm.DB) error {
 				Price:       price,
 				Quantity:    int64((i%20)+1),
 				Status:      "display",
-				TagColor:    "blue",
+				TagColor:    color,
 				OldPrice:    price,
 				ActualPrice: price,
 			}

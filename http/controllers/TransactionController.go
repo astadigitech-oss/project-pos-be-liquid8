@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -411,6 +412,10 @@ func GetCurrentCart(c *gin.Context) {
             Total: price * float64(qty),
         })
     }
+    // sorting dari harga terendah
+    sort.Slice(itemsPrice, func(i, j int) bool {
+        return itemsPrice[i].Price < itemsPrice[j].Price
+    })
 
     ppn_price := math.Round(totalSubtotal * (ppn.Ppn / 100))
     totalBelanja := math.Round(totalSubtotal + ppn_price)
@@ -718,6 +723,10 @@ func CheckoutTransaction(c *gin.Context) {
             Total: price * float64(qty),
         })
     }
+    // sorting dari harga terendah
+    sort.Slice(txRowPrice, func(i, j int) bool {
+        return txRowPrice[i].Price < txRowPrice[j].Price
+    })
 
     ppnAmount := math.Round(subTotal * (ppn.Ppn / 100))
 	totalTransaction := math.Round(subTotal + ppnAmount + (float64(p.PlasticQty) * p.PlasticUnitPrice))
@@ -802,8 +811,11 @@ func CheckoutTransaction(c *gin.Context) {
         "customer_name": member.Name,
         "total_item": tr.TotalItem,
         "total_quantity": tr.TotalQuantity,
-        "plastic_qty": tr.PlasticQty,
-        "plastic_unit_price": tr.PlasticUnitPrice,
+        "plastic": gin.H{
+            "qty": tr.PlasticQty,
+            "unit_price": tr.PlasticUnitPrice,
+            "total": float64(tr.PlasticQty) * tr.PlasticUnitPrice,
+        },
         "paid_amount": tr.PaidAmount,
         "change_amount": tr.ChangeAmount,
         "payment_method": tr.PaymentMethod,
@@ -944,16 +956,21 @@ func DetailTransaction(c *gin.Context) {
         Total float64   `json:"total"`
     }
 
+    type plasticInfo struct {
+        Qty uint `json:"qty"`
+        UnitPrice float64 `json:"unit_price"`
+        Total float64 `json:"total"`
+    }
     // 🔹 Struct response
     var result struct {
         ID        uint64  `json:"id"`
         Invoice   string  `json:"invoice"`
         Kasir     string  `json:"kasir"`
+        UserCancel     string  `json:"user_cancel"`
         CustomerName string `json:"customer_name"`       
         TotalItem    int     `json:"total_item"`
         TotalQuantity int     `json:"total_quantity"`
-        PlasticQty uint     `json:"plastic_qty"`
-        PlasticUnitPrice float64 `json:"plastic_unit_price"`
+        Plastic     plasticInfo `json:"plastic"`
         PaidAmount float64 `json:"paid_amount"`
         ChangeAmount float64 `json:"change_amount"`
         PaymentMethod string  `json:"payment_method"`
@@ -981,6 +998,7 @@ func DetailTransaction(c *gin.Context) {
     var tx models.Transaction
     if err := config.DB.
         Preload("User").
+        Preload("UserCancel").
         Preload("Member", func(db *gorm.DB) *gorm.DB {
             return db.Unscoped()
         }).
@@ -991,14 +1009,21 @@ func DetailTransaction(c *gin.Context) {
 
     tx.ToLocal(tx.Store.Timezone)
 
+    userCancel := "-"
+    if tx.UserCancel != nil {
+        userCancel = tx.UserCancel.Name
+    }
+
     result.ID = tx.ID
     result.Invoice = tx.Invoice
     result.Kasir = tx.User.Name
+    result.UserCancel = userCancel
     result.CustomerName = tx.Member.Name
     result.TotalItem = tx.TotalItem
     result.TotalQuantity = tx.TotalQuantity
-    result.PlasticQty = tx.PlasticQty
-    result.PlasticUnitPrice = tx.PlasticUnitPrice
+    result.Plastic.Qty = tx.PlasticQty
+    result.Plastic.UnitPrice = tx.PlasticUnitPrice
+    result.Plastic.Total = float64(tx.PlasticQty) * tx.PlasticUnitPrice
     result.PaidAmount = tx.PaidAmount
     result.ChangeAmount = tx.ChangeAmount
     result.PaymentMethod = tx.PaymentMethod
@@ -1048,6 +1073,10 @@ func DetailTransaction(c *gin.Context) {
             Total: price * float64(qty),
         })
     }
+    // sorting dari harga terendah
+    sort.Slice(result.Items, func(i, j int) bool {
+        return result.Items[i].Price < result.Items[j].Price
+    })
 
     result.Products = items
     // result.Items = itemsPrice
@@ -1094,6 +1123,8 @@ func DetailTransactionsShift(c *gin.Context) {
     var summary struct {
         TotalInvoice int64
         TotalRounded float64
+        PlasticQty uint
+        PlasticUnitPrice float64
         TotalAmount float64
         CashCancelled float64
 		TransferCancelled float64
@@ -1105,6 +1136,10 @@ func DetailTransactionsShift(c *gin.Context) {
             COUNT(*) as total_invoice,
             COALESCE(SUM(CASE WHEN status = 'done' THEN rounded_price ELSE 0 END),0) AS total_rounded,
             COALESCE(SUM(CASE WHEN status = 'done' THEN total_amount ELSE 0 END),0) AS total_amount,
+
+            COALESCE(SUM(CASE WHEN status = 'done' THEN plastic_qty ELSE 0 END),0) AS plastic_qty,
+			COALESCE(SUM(CASE WHEN status = 'done' THEN plastic_unit_price ELSE 0 END),0) AS plastic_unit_price,
+
             COALESCE(SUM(CASE WHEN payment_method = 'cash' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS cash_cancelled,
 			COALESCE(SUM(CASE WHEN payment_method = 'transfer' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS transfer_cancelled,
 			COALESCE(SUM(CASE WHEN payment_method = 'qris' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS qris_cancelled
@@ -1145,6 +1180,8 @@ func DetailTransactionsShift(c *gin.Context) {
         TotalCashCancel       float64     `json:"total_cash_cancel"`
         TotalTransferCancel       float64     `json:"total_transfer_cancel"`
         TotalQrisCancel       float64     `json:"total_qris_cancel"`
+        TotalPlasticQty uint `json:"total_plastic_qty"`
+        TotalPlasticUnitPrice float64 `json:"total_plastic_unit_price"`
         
         TotalTax        float64    `json:"total_tax"`
         TotalSubtotal   float64    `json:"total_subtotal"`
@@ -1237,6 +1274,8 @@ func DetailTransactionsShift(c *gin.Context) {
     result.TotalCashCancel = summary.CashCancelled
     result.TotalTransferCancel = summary.TransferCancelled
     result.TotalQrisCancel = summary.QrisCancelled
+    result.TotalPlasticQty = summary.PlasticQty
+    result.TotalPlasticUnitPrice = summary.PlasticUnitPrice
     
     result.TotalTax = shift.TotalTax
     result.TotalSubtotal = shift.Subtotal

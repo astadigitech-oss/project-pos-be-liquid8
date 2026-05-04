@@ -453,6 +453,9 @@ func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (m
 		TotalAmount float64  //total subtotal + pajak
 		TotalRounded float64  //total pembulatan
 		TaxAmount  float64	 //total pajak
+
+		PlasticQty uint
+		PlasticUnitPrice float64
 		
 		Cash       float64
 		Transfer   float64
@@ -472,6 +475,8 @@ func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (m
 			COALESCE(SUM(CASE WHEN status = 'done' THEN total_amount ELSE 0 END), 0) AS total_amount,
 			COALESCE(SUM(CASE WHEN status = 'done' THEN tax_price ELSE 0 END), 0) AS tax_amount,
 			COALESCE(SUM(CASE WHEN status = 'done' THEN rounded_price ELSE 0 END),0) AS total_rounded,
+			COALESCE(SUM(CASE WHEN status = 'done' THEN plastic_qty ELSE 0 END),0) AS plastic_qty,
+			COALESCE(SUM(CASE WHEN status = 'done' THEN plastic_unit_price ELSE 0 END),0) AS plastic_unit_price,
 			
 			COALESCE(SUM(CASE WHEN payment_method = 'cash' AND status = 'done' THEN total_amount ELSE 0 END),0) AS cash,
 			COALESCE(SUM(CASE WHEN payment_method = 'transfer' AND status = 'done' THEN total_amount ELSE 0 END),0) AS transfer,
@@ -495,6 +500,8 @@ func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (m
 		"total_amount": res.TotalAmount,
 		"total_rounded": res.TotalRounded,
 		"tax_amount":  res.TaxAmount,
+		"plastic_qty": res.PlasticQty,
+		"plastic_unit_price": res.PlasticUnitPrice,
 		"cash":     res.Cash,
 		"transfer": res.Transfer,
 		"qris":     res.Qris,

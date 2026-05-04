@@ -31,7 +31,7 @@ type Transaction struct {
 	//relation
 	Store   *StoreProfile `gorm:"foreignKey:StoreID;references:ID" json:"store,omitempty"`
 	User   *User `gorm:"foreignKey:UserID;references:ID" json:"user,omitempty"`
-	UserCancel   *User `gorm:"foreignKey:UserID;references:ID" json:"user_cancel,omitempty"`
+	UserCancel   *User `gorm:"foreignKey:CancelledBy;references:ID" json:"user_cancel,omitempty"`
 	Member   *Member `gorm:"foreignKey:MemberID;references:ID" json:"member,omitempty"`
 	Items []TransactionItem `json:"items,omitempty" gorm:"foreignKey:TransactionID;references:ID"`
 
