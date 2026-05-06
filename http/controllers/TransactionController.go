@@ -35,7 +35,7 @@ func AddToCart(c *gin.Context) {
 	}()
 
     type payload struct {
-        ProductID   uint64 `json:"product_id" binding:"required"`
+        ReferenceID   string `json:"reference_id" binding:"required"`
         Type string `json:"type" binding:"required,oneof=product packaging"` // product | packaging
     }
 
@@ -105,7 +105,7 @@ func AddToCart(c *gin.Context) {
     var cartItem models.CartItem
     if p.Type == "product" {
         var product models.Product
-		if err := tx.Where("id = ? AND store_id = ? AND deleted_at IS NULL", p.ProductID, storeID).
+		if err := tx.Where("barcode = ? AND store_id = ? AND deleted_at IS NULL", p.ReferenceID, storeID).
 			First(&product).Error; err != nil {
 			tx.Rollback()
 			helpers.ErrorResponse(c, 404, "Product tidak ditemukan", err)
@@ -139,8 +139,16 @@ func AddToCart(c *gin.Context) {
             return
         }
     }else {
+        // convert string -> uint64
+        packagingID, errCek := strconv.ParseUint(p.ReferenceID, 10, 64)
+        if errCek != nil {
+            tx.Rollback()
+            helpers.ErrorResponse(c, 400, "Packaging ID harus berupa angka", err)
+            return
+        }
+        
         var packaging models.Packaging
-        if err := tx.Where("id = ?", p.ProductID).
+        if err := tx.Where("id = ?", packagingID).
             First(&packaging).Error; err != nil {
             tx.Rollback()
             helpers.ErrorResponse(c, 404, "Packaging tidak ditemukan", err)
@@ -454,11 +462,35 @@ func GetCurrentCart(c *gin.Context) {
         Subtotal      float64 `json:"subtotal"`
     }
 
+    //load ppn
+    var ppn models.Ppn
+    if err := config.DB.Where("is_tax_default = ?", true).First(&ppn).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            helpers.ErrorResponse(c, 404, "PPN tidak ditemukan", nil)
+        } else {
+            helpers.ErrorResponse(c, 500, "Internal server error", err)
+        }
+        return     
+    }
+
     //load cart 
     var cart models.Cart
     if err := config.DB.Where("user_id = ? AND store_id = ? AND (keep_code IS NULL OR keep_code = '')", user.ID, storeID).First(&cart).Error; err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
-            helpers.ErrorResponse(c, 404, "Data cart kosong", nil)
+            payload := gin.H{
+                "products": nil,
+                "items": nil,
+                "items_packaging": nil,
+                "subtotal": 0,
+                "ppn": gin.H{
+                    "tax": ppn.Ppn,
+                    "amount": 0,
+                },
+                "total_amount": 0,
+                "pembulatan": 0,
+            }
+
+            c.JSON(http.StatusOK, response.Success("Current cart", payload))
         }else {
             helpers.ErrorResponse(c, 500, "Internal server error", err)
         }
@@ -475,16 +507,6 @@ func GetCurrentCart(c *gin.Context) {
     if err != nil {
         helpers.ErrorResponse(c, 500, "Failed to load current cart", err)
         return
-    }
-
-    var ppn models.Ppn
-    if err := config.DB.Where("is_tax_default = ?", true).First(&ppn).Error; err != nil {
-        if errors.Is(err, gorm.ErrRecordNotFound) {
-            helpers.ErrorResponse(c, 404, "PPN tidak ditemukan", nil)
-        } else {
-            helpers.ErrorResponse(c, 500, "Internal server error", err)
-        }
-        return     
     }
 
     type txRowPriceModel struct {
