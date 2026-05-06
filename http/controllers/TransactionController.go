@@ -50,9 +50,9 @@ func AddToCart(c *gin.Context) {
 		errorsMap := make(map[string]string)
 		for _, e := range ve {
 			switch e.Field() {
-			case "ProductID":
+			case "ReferenceID":
 				if e.Tag() == "required" {
-					errorsMap["product_id"] = "Product ID wajib diisi"
+					errorsMap["reference_id"] = "Reference ID wajib diisi"
 				}
 			case "Type":
 				if e.Tag() == "required" {
