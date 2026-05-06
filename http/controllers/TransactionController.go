@@ -71,7 +71,7 @@ func AddToCart(c *gin.Context) {
 	}
 
     quantity := uint64(1)
-    if p.Qty != nil {
+    if p.Qty != nil && *p.Qty > 0 {
         quantity = *p.Qty
     }
 
