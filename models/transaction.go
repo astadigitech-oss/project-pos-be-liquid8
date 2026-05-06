@@ -12,8 +12,8 @@ type Transaction struct {
 	Invoice string `json:"invoice" gorm:"unique;size:25;not null"`
 	TotalItem     int `json:"total_item" gorm:"default:0;"`
 	TotalQuantity int `json:"total_quantity" gorm:"default:0"`
-	PlasticQty uint `json:"plastic_qty" gorm:"default:0"`
-	PlasticUnitPrice     float64 `json:"plastic_unit_price" gorm:"type:decimal(18,2);default:0"`
+	TotalPackagingQty uint64 `json:"total_packaging_qty" gorm:"default:0"`
+	TotalPackagingPrice     float64 `json:"total_packaging_price" gorm:"type:decimal(18,2);default:0"`
 	MemberPoint   int `json:"member_point" gorm:"default:0"`
 	Subtotal     float64 `json:"subtotal" gorm:"type:decimal(18,2);default:0"`
 	Tax          float64 `json:"tax" gorm:"type:decimal(18,2);default:0"`

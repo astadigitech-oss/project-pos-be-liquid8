@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"database/sql"
+	"errors"
 	"liquid8/pos/models"
 	"net/url"
 	"os"
@@ -445,7 +446,6 @@ func RoundTo500(n int) float64 {
 
 	return float64((n - remainder) + 1000)
 }
-
 func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (map[string]interface{}, error) {
 	type result struct {
 		Subtotal   float64
@@ -453,9 +453,6 @@ func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (m
 		TotalAmount float64  //total subtotal + pajak
 		TotalRounded float64  //total pembulatan
 		TaxAmount  float64	 //total pajak
-
-		PlasticQty uint
-		PlasticUnitPrice float64
 		
 		Cash       float64
 		Transfer   float64
@@ -475,8 +472,6 @@ func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (m
 			COALESCE(SUM(CASE WHEN status = 'done' THEN total_amount ELSE 0 END), 0) AS total_amount,
 			COALESCE(SUM(CASE WHEN status = 'done' THEN tax_price ELSE 0 END), 0) AS tax_amount,
 			COALESCE(SUM(CASE WHEN status = 'done' THEN rounded_price ELSE 0 END),0) AS total_rounded,
-			COALESCE(SUM(CASE WHEN status = 'done' THEN plastic_qty ELSE 0 END),0) AS plastic_qty,
-			COALESCE(SUM(CASE WHEN status = 'done' THEN plastic_unit_price ELSE 0 END),0) AS plastic_unit_price,
 			
 			COALESCE(SUM(CASE WHEN payment_method = 'cash' AND status = 'done' THEN total_amount ELSE 0 END),0) AS cash,
 			COALESCE(SUM(CASE WHEN payment_method = 'transfer' AND status = 'done' THEN total_amount ELSE 0 END),0) AS transfer,
@@ -500,8 +495,6 @@ func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (m
 		"total_amount": res.TotalAmount,
 		"total_rounded": res.TotalRounded,
 		"tax_amount":  res.TaxAmount,
-		"plastic_qty": res.PlasticQty,
-		"plastic_unit_price": res.PlasticUnitPrice,
 		"cash":     res.Cash,
 		"transfer": res.Transfer,
 		"qris":     res.Qris,
@@ -510,12 +503,40 @@ func RecalculateTransactionShift(db *gorm.DB, storeID uint64, shiftID uint64) (m
 		"total_qris_cancel":     res.QrisCancelled,
 	}, nil
 }
+func RecalculateCart(tx *gorm.DB, cartID uint64) error {
+	var subtotal float64
+
+	// hitung ulang dari cart_items
+	if err := tx.Model(&models.CartItem{}).
+		Where("cart_id = ?", cartID).
+		Select("COALESCE(SUM(subtotal),0)").
+		Scan(&subtotal).Error; err != nil {
+		return err
+	}
+
+	// ambil data cart (untuk packaging nanti)
+	var cart models.Cart
+	if err := tx.First(&cart, cartID).Error; err != nil {
+		return errors.New("cart tidak ditemukan: " + err.Error())
+	}
+
+	// base untuk ppn
+	grand_total := subtotal
+
+	// update cart
+	return tx.Model(&models.Cart{}).
+		Where("id = ?", cartID).
+		Updates(map[string]interface{}{
+			"subtotal":    subtotal,
+			"grand_total": grand_total,
+		}).Error
+}
 func GeneratePendingKeepCode(db *gorm.DB, storeID uint64) (string, error) {
 	// MySQL: substring start index is 1-based. Prefix 'KSRPEND' length = 7, numeric part starts at 8
 	var maxNum sql.NullInt64
 	row := db.Raw(`
 		SELECT COALESCE(MAX(CAST(SUBSTRING(keep_code, 8) AS UNSIGNED)), 0) as maxnum
-		FROM cart_items
+		FROM carts
 		WHERE keep_code IS NOT NULL AND store_id = ?
 	`, storeID).Row()
 

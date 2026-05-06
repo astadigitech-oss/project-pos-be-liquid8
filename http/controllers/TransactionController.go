@@ -35,7 +35,8 @@ func AddToCart(c *gin.Context) {
 	}()
 
     type payload struct {
-        ProductBarcode string  `json:"product_barcode" binding:"required"`
+        ProductID   uint64 `json:"product_id" binding:"required"`
+        Type string `json:"type" binding:"required,oneof=product packaging"` // product | packaging
     }
 
     var p payload
@@ -49,10 +50,16 @@ func AddToCart(c *gin.Context) {
 		errorsMap := make(map[string]string)
 		for _, e := range ve {
 			switch e.Field() {
-			case "ProductBarcode":
+			case "ProductID":
 				if e.Tag() == "required" {
-					errorsMap["product_barcode"] = "Product barcode wajib diisi"
+					errorsMap["product_id"] = "Product ID wajib diisi"
 				}
+			case "Type":
+				if e.Tag() == "required" {
+					errorsMap["type"] = "Type wajib diisi"
+				}else {
+                    errorsMap["type"] = "Type harus 'product' atau 'packaging'"
+                }
 			default:
 				errorsMap[e.Field()] = "Validasi gagal"
 			}
@@ -70,41 +77,123 @@ func AddToCart(c *gin.Context) {
 		return
 	}
 
-    // load product
-    var product models.Product
-    if err := config.DB.Where("barcode = ? AND store_id = ? AND deleted_at IS NULL", p.ProductBarcode, storeID).First(&product).Error; err != nil {
-        helpers.ErrorResponse(c, 404, fmt.Sprintf("Product tidak ditemukan %s", p.ProductBarcode), err)
-        return
-    }
+    tx := config.DB.WithContext(c.Request.Context()).Begin()
+    // cek cart aktif
+	var cart models.Cart
+	err := tx.Where("store_id = ? AND user_id = ? AND keep_code IS NULL", storeID, user.ID).
+		First(&cart).Error
 
-	if product.Status == "sale" {
-		helpers.ErrorResponse(c, 422, "Barang sudah discan", nil)
-		return
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// buat cart baru
+			cart = models.Cart{
+				StoreID: storeID,
+				UserID:  uint64(user.ID),
+			}
+			if err := tx.Create(&cart).Error; err != nil {
+				tx.Rollback()
+				helpers.ErrorResponse(c, 500, "Failed to create cart", err)
+				return
+			}
+		} else {
+			tx.Rollback()
+			helpers.ErrorResponse(c, 500, "Failed to check cart", err)
+			return
+		}
 	}
 
-    // create cart item
-    cart := models.CartItem{
-        StoreID: storeID,
-        UserID:  uint64(user.ID),
-        ProductID: product.ID,
-        ProductName: product.Name,
-        Quantity: int64(product.Quantity),
-        Price: product.Price,
-        DiscountPrice: 0,
-        Subtotal: product.Price,
+    var cartItem models.CartItem
+    if p.Type == "product" {
+        var product models.Product
+		if err := tx.Where("id = ? AND store_id = ? AND deleted_at IS NULL", p.ProductID, storeID).
+			First(&product).Error; err != nil {
+			tx.Rollback()
+			helpers.ErrorResponse(c, 404, "Product tidak ditemukan", err)
+			return
+		}
+		if product.Status == "sale" {
+			tx.Rollback()
+			helpers.ErrorResponse(c, 422, "Barang sudah discan", nil)
+			return
+		}
+        // update product status
+        if err := tx.Model(&product).Update("status", "sale").Error; err != nil {
+            tx.Rollback()
+            helpers.ErrorResponse(c, 500, "Failed to update product", err)
+            return
+        }
+
+        cartItem = models.CartItem{
+			CartID:      cart.ID,
+			ProductID: &product.ID,
+			Type:    "product",
+			ProductName: product.Name,
+			Quantity:    1,
+			Price:       product.Price,
+			Subtotal:    product.Price,
+		}
+        // insert cart item
+        if err := tx.Create(&cartItem).Error; err != nil {
+            tx.Rollback()
+            helpers.ErrorResponse(c, 500, "Failed to create cart item", err)
+            return
+        }
+    }else {
+        var packaging models.Packaging
+        if err := tx.Where("id = ?", p.ProductID).
+            First(&packaging).Error; err != nil {
+            tx.Rollback()
+            helpers.ErrorResponse(c, 404, "Packaging tidak ditemukan", err)
+            return
+        }
+
+        // cek apakah sudah ada di cart
+        var existing models.CartItem
+        err := tx.Where("cart_id = ? AND packaging_id = ?", cart.ID, packaging.ID).
+            First(&existing).Error
+
+        if err == nil {
+            // sudah ada → update qty
+            newQty := existing.Quantity + 1
+            newSubtotal := float64(newQty) * existing.Price
+
+            if err := tx.Model(&existing).Updates(map[string]interface{}{
+                "quantity": newQty,
+                "subtotal": newSubtotal,
+            }).Error; err != nil {
+                tx.Rollback()
+                helpers.ErrorResponse(c, 500, "Failed to update packaging", err)
+                return
+            }
+            cartItem = existing
+        } else if errors.Is(err, gorm.ErrRecordNotFound) {
+            // belum ada → insert baru
+            cartItem = models.CartItem{
+                CartID:      cart.ID,
+                PackagingID: &packaging.ID,
+                Type:    "packaging",
+                ProductName: packaging.Name,
+                Quantity:    1,
+                Price:       packaging.Price,
+                Subtotal:    packaging.Price,
+            }
+
+            if err := tx.Create(&cartItem).Error; err != nil {
+                tx.Rollback()
+                helpers.ErrorResponse(c, 500, "Failed to create packaging item", err)
+                return
+            }
+        } else {
+            tx.Rollback()
+            helpers.ErrorResponse(c, 500, "Failed to check packaging item", err)
+            return
+        }
     }
 
-    tx := config.DB.WithContext(c.Request.Context()).Begin()
-    if err := tx.Create(&cart).Error; err != nil {
+    //recalculate cart total
+    if err := helpers.RecalculateCart(tx, cart.ID); err != nil {
         tx.Rollback()
-        helpers.ErrorResponse(c, 500, "Failed to add to cart", err)
-        return
-    }
-
-    // update product status
-    if err := tx.Model(&product).Update("status", "sale").Error; err != nil {
-        tx.Rollback()
-        helpers.ErrorResponse(c, 500, "Failed to update product", err)
+        helpers.ErrorResponse(c, 500, "Failed to recalculate cart", err)
         return
     }
 
@@ -113,35 +202,38 @@ func AddToCart(c *gin.Context) {
         return
     }
 
-    c.JSON(http.StatusOK, response.Success("Added to cart", cart))
+    c.JSON(http.StatusOK, response.Success("Added to cart", cartItem))
 }
 func RemoveItemCart(c *gin.Context) {
-    user := c.MustGet("auth_user").(models.User)
-    storeID := uint64(0)
-    if user.StoreID == nil {
-        helpers.ErrorResponse(c, 400, "User does not have store ID", nil)
-        return
-    }
-    storeID = *user.StoreID
-    cartID := c.Param("cart_id")
+    // user := c.MustGet("auth_user").(models.User)
+    cartID := c.Param("cart_item_id")
 
     var cartItem models.CartItem
-    if err := config.DB.Where("id = ? AND user_id = ? AND store_id = ?", cartID, user.ID, storeID).First(&cartItem).Error; err != nil {
+    if err := config.DB.Where("id = ?", cartID).First(&cartItem).Error; err != nil {
         helpers.ErrorResponse(c, 404, "Cart item not found", err)
         return
     }
 
     tx := config.DB.WithContext(c.Request.Context()).Begin()
-    //update data product back to display
-    if err := tx.Model(&models.Product{}).Where("id = ?", cartItem.ProductID).Update("status", "display").Error; err != nil {
-        tx.Rollback()
-        helpers.ErrorResponse(c, 500, "Failed to update product status", err)
-        return
+    if cartItem.Type == "product" {        
+        //update data product back to display
+        if err := tx.Model(&models.Product{}).Where("id = ?", *cartItem.ProductID).Update("status", "display").Error; err != nil {
+            tx.Rollback()
+            helpers.ErrorResponse(c, 500, "Failed to update product status", err)
+            return
+        }
     }
     // delete cart item
     if err := tx.Delete(&cartItem).Error; err != nil {
         tx.Rollback()
         helpers.ErrorResponse(c, 500, "Failed to remove cart item", err)
+        return
+    }
+
+    //recalculate cart total
+    if err := helpers.RecalculateCart(tx, cartItem.CartID); err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "Failed to recalculate cart", err)
         return
     }
 
@@ -207,7 +299,7 @@ func PendingCart(c *gin.Context) {
 	}
 
     // update cart items without keep_code for this user/store
-    if err := config.DB.Model(&models.CartItem{}).
+    if err := config.DB.Model(&models.Cart{}).
         Where("user_id = ? AND store_id = ? AND (keep_code = '' OR keep_code IS NULL)", user.ID, storeID).
         Updates(map[string]interface{}{
             "keep_code": keep,
@@ -220,68 +312,83 @@ func PendingCart(c *gin.Context) {
     c.JSON(http.StatusOK, response.Success("Cart pending created", nil))
 }
 func ListPending(c *gin.Context) {
-    user := c.MustGet("auth_user").(models.User)
-    storeID := uint64(0)
-    if user.StoreID == nil {
-        helpers.ErrorResponse(c, 403, "User does not have store ID", nil)
-        return
-    }
-    storeID = *user.StoreID
+	user := c.MustGet("auth_user").(models.User)
 
-    q := strings.TrimSpace(c.DefaultQuery("q", ""))
-    page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
-    if page < 1 { page = 1 }
-    offset := (page-1)*limit
+	if user.StoreID == nil {
+		helpers.ErrorResponse(c, 403, "User does not have store ID", nil)
+		return
+	}
+	storeID := *user.StoreID
 
-    type pendingGroup struct {
-        CustomerName string  `json:"customer_name"`
-        KeepCode     string  `json:"keep_code"`
-        ItemCount    int64   `json:"item_count"`
-        Total        float64 `json:"total"`
-    }
+	q := strings.TrimSpace(c.DefaultQuery("q", ""))
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * limit
 
-    var groups []pendingGroup
+	type pendingGroup struct {
+		CustomerName string  `json:"customer_name"`
+		KeepCode     string  `json:"keep_code"`
+		ItemCount    int64   `json:"item_count"`
+		Total        float64 `json:"total"`
+	}
 
-    // build where and args
-    baseWhere := "WHERE ci.user_id = ? AND ci.store_id = ? AND ci.keep_code IS NOT NULL AND ci.keep_code != ''"
-    args := []interface{}{user.ID, storeID}
-    if q != "" {
-        baseWhere += " AND m.name LIKE ?"
-        args = append(args, "%"+q+"%")
-    }
+	var groups []pendingGroup
 
-    // count distinct keep_code
-    var total int64
-    countSQL := "SELECT COUNT(DISTINCT ci.keep_code) FROM cart_items ci JOIN members m ON ci.member_id = m.id " + baseWhere
-    if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "Failed to count pending groups", err)
-        return
-    }
+	// base where dari carts
+	baseWhere := "WHERE c.user_id = ? AND c.store_id = ? AND c.keep_code IS NOT NULL AND c.keep_code != ''"
+	args := []interface{}{user.ID, storeID}
 
-    dataSQL := fmt.Sprintf(`
-        SELECT 
-            MAX(m.name) AS customer_name,
-            ci.keep_code,
-            COUNT(*) AS item_count,
-            COALESCE(SUM(ci.subtotal),0) AS total
-        FROM cart_items ci 
-        JOIN members m ON ci.member_id = m.id 
-        %s
-        GROUP BY ci.keep_code
-        ORDER BY MAX(ci.created_at) DESC
-        LIMIT ? OFFSET ?
-    `, baseWhere)
-    args = append(args, limit, offset)
-    if err := config.DB.Raw(dataSQL, args...).Scan(&groups).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "Failed to list pending groups", err)
-        return
-    }
+	if q != "" {
+		baseWhere += " AND m.name LIKE ?"
+		args = append(args, "%"+q+"%")
+	}
 
-    lastPage := int(math.Ceil(float64(total)/float64(limit)))
-    pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(groups), int(total))
+	// count dari carts (bukan cart_items lagi)
+	var total int64
+	countSQL := `
+		SELECT COUNT(*)
+		FROM carts c
+		LEFT JOIN members m ON m.id = c.member_id
+	` + baseWhere
 
-    c.JSON(http.StatusOK, response.Success("List Pending transactions", gin.H{"data": groups, "pagination": pagination}))
+	if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "Failed to count pending groups", err)
+		return
+	}
+
+	// ambil data
+	dataSQL := fmt.Sprintf(`
+		SELECT 
+			COALESCE(m.name, '-') AS customer_name,
+			c.keep_code,
+			COUNT(ci.id) AS item_count,
+			c.grand_total AS total
+		FROM carts c
+		LEFT JOIN cart_items ci ON ci.cart_id = c.id
+		LEFT JOIN members m ON m.id = c.member_id
+		%s
+		GROUP BY c.id, c.keep_code, m.name
+		ORDER BY c.updated_at DESC
+		LIMIT ? OFFSET ?
+	`, baseWhere)
+
+	args = append(args, limit, offset)
+
+	if err := config.DB.Raw(dataSQL, args...).Scan(&groups).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "Failed to list pending groups", err)
+		return
+	}
+
+	lastPage := int(math.Ceil(float64(total) / float64(limit)))
+	pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(groups), int(total))
+
+	c.JSON(http.StatusOK, response.Success("List Pending transactions", gin.H{
+		"data":       groups,
+		"pagination": pagination,
+	}))
 }
 func ResumePendingCheck(c *gin.Context) {
     user := c.MustGet("auth_user").(models.User)
@@ -293,10 +400,10 @@ func ResumePendingCheck(c *gin.Context) {
 	storeID = *user.StoreID
 
     keep := c.Param("keep_code")
-	var existing models.CartItem
+	var existing models.Cart
     if err := config.DB.Where("keep_code = ? AND store_id = ?", keep, storeID).First(&existing).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			helpers.ErrorResponse(c, 404, "Tidak ada cart item yang ditemukan", nil)
+			helpers.ErrorResponse(c, 404, "Tidak ada cart yang ditemukan", nil)
 		}else {
 			helpers.ErrorResponse(c, 500, "Internal server error", err)
 		}
@@ -305,7 +412,7 @@ func ResumePendingCheck(c *gin.Context) {
 
     // check current active cart (without keep_code)
     var count int64
-    if err := config.DB.Model(&models.CartItem{}).
+    if err := config.DB.Model(&models.Cart{}).
         Where("user_id = ? AND store_id = ? AND (keep_code = '' OR keep_code IS NULL)", user.ID, storeID).
         Count(&count).Error; err != nil {
         helpers.ErrorResponse(c, 500, "Failed to check cart", err)
@@ -317,14 +424,14 @@ func ResumePendingCheck(c *gin.Context) {
         return
     }
 
-	//update cart item
-	if err := config.DB.Model(&models.CartItem{}).Where("keep_code = ?", keep).Update("keep_code", nil).Error; err != nil {
+	//update cart
+	if err := config.DB.Model(&models.Cart{}).Where("keep_code = ?", keep).Update("keep_code", nil).Error; err != nil {
 		helpers.ErrorResponse(c, 500, "Internal server error", err)
 		return
 	}
 
 	var cart_items []models.CartItem
-	if err := config.DB.Where("user_id = ? and store_id = ? AND (keep_code = '' OR keep_code IS NULL)", user.ID, storeID).Find(&cart_items).Error; err != nil {
+	if err := config.DB.Where("cart_id = ?", existing.ID).Find(&cart_items).Error; err != nil {
 		helpers.ErrorResponse(c, 500, "Internal server error", err)
 		return
 	}
@@ -338,40 +445,32 @@ func GetCurrentCart(c *gin.Context) {
 
     type cartItemResponse struct {
         ID            uint64  `json:"id"`
-        StoreID       uint64  `json:"store_id"`
-        MemberID      *uint64 `json:"member_id"`
-        UserID        uint64  `json:"user_id"`
         ProductID     uint64  `json:"product_id"`
         Barcode       string  `json:"barcode"`
-        KeepCode      *string `json:"keep_code"`
         ProductName   string  `json:"product_name"`
-        Quantity      int64   `json:"quantity"`
+        Quantity      uint64   `json:"quantity"`
         Price         float64 `json:"price"`
         DiscountPrice float64 `json:"discount_price"`
         Subtotal      float64 `json:"subtotal"`
     }
 
+    //load cart 
+    var cart models.Cart
+    if err := config.DB.Where("user_id = ? AND store_id = ? AND (keep_code IS NULL OR keep_code = '')", user.ID, storeID).First(&cart).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            helpers.ErrorResponse(c, 404, "Data cart kosong", nil)
+        }else {
+            helpers.ErrorResponse(c, 500, "Internal server error", err)
+        }
+        return
+    }
+
+    var cartItems []models.CartItem
     var items []cartItemResponse
-    err := config.DB.
-        Table("cart_items").
-        Select(`
-            cart_items.id,
-            cart_items.store_id,
-            cart_items.member_id,
-            cart_items.user_id,
-            cart_items.product_id,
-            products.barcode,
-            cart_items.keep_code,
-            products.name as product_name,
-            cart_items.quantity,
-            cart_items.price,
-            cart_items.discount_price,
-            cart_items.subtotal
-        `).
-        Joins("LEFT JOIN products ON products.id = cart_items.product_id").
-        Where("cart_items.user_id = ? AND cart_items.store_id = ? AND (cart_items.keep_code IS NULL OR cart_items.keep_code = '')",
-            user.ID, storeID).
-        Scan(&items).Error
+    err := config.DB.Model(&models.CartItem{}).
+        Preload("Product").Preload("Packaging").
+        Where("cart_id = ?", cart.ID).
+        Find(&cartItems).Error
 
     if err != nil {
         helpers.ErrorResponse(c, 500, "Failed to load current cart", err)
@@ -394,15 +493,46 @@ func GetCurrentCart(c *gin.Context) {
         Quantity    int64 `json:"quantity"`
         Total    float64 `json:"total"`
     }
-    var totalSubtotal, totalAmount float64
-    var totalQuantity int64
-    priceMap := make(map[float64]int64)
-    for _, it := range items {
-        totalSubtotal += it.Subtotal
-        totalQuantity += it.Quantity
-        priceMap[it.Price] += 1
+    type txPackagingModel struct {
+        ID uint64 `json:"id"`
+        Name string `json:"name"`
+        Price     float64  `json:"price"`
+        Quantity    uint64 `json:"quantity"`
+        Total    float64 `json:"total"`
     }
 
+    //item packaging
+    var itemsPackaging []txPackagingModel
+    priceMap := make(map[float64]int64)
+    for _, it := range cartItems {
+        
+        if it.Type == "product" && it.Product != nil {
+            priceMap[it.Price] += 1
+            items = append(items, cartItemResponse{
+                ID: it.ID,
+                ProductID: *it.ProductID,
+                Barcode: it.Product.Barcode,
+                ProductName: it.Product.Name,
+                Quantity: it.Quantity,
+                Price: it.Price,
+                DiscountPrice: it.DiscountPrice,
+                Subtotal: it.Subtotal,
+            })
+        }else if it.Type == "packaging" && it.Packaging != nil {
+            itemsPackaging = append(itemsPackaging, txPackagingModel{
+                ID: it.ID,
+                Name: it.Packaging.Name,
+                Price: it.Price,
+                Quantity: it.Quantity,
+                Total: it.Price * float64(it.Quantity),
+            })
+        }else {
+            helpers.ErrorResponse(c, 500, "Unknown cart item type", fmt.Errorf("unknown cart item type: %s", it.Type))
+            return
+        }
+    }
+
+    //grouping item berdasarkan harga (untuk kebutuhan struk nanti)
     var itemsPrice []txRowPriceModel
     for price, qty := range priceMap {
         itemsPrice = append(itemsPrice, txRowPriceModel{
@@ -417,15 +547,16 @@ func GetCurrentCart(c *gin.Context) {
         return itemsPrice[i].Price < itemsPrice[j].Price
     })
 
-    ppn_price := math.Round(totalSubtotal * (ppn.Ppn / 100))
-    totalBelanja := math.Round(totalSubtotal + ppn_price)
-    totalAmount = helpers.RoundTo500(int(totalBelanja))
+    ppn_price := math.Round(cart.GrandTotal * (ppn.Ppn / 100))
+    totalBelanja := math.Round(cart.GrandTotal + ppn_price)
+    totalAmount := helpers.RoundTo500(int(totalBelanja))
     pembulatan := totalAmount - totalBelanja
 
     payload := gin.H{
         "products": items,
         "items": itemsPrice,
-        "subtotal": totalSubtotal,
+        "items_packaging": itemsPackaging,
+        "subtotal": cart.GrandTotal,
         "ppn": gin.H{
             "tax": ppn.Ppn,
             "amount": ppn_price,
@@ -446,29 +577,41 @@ func RemoveCartByKeepCode(c *gin.Context) {
         helpers.ErrorResponse(c, 400, "keep_code required", nil)
         return
     }
-
-    // load cart items to know affected products
-    var items []models.CartItem
-    if err := config.DB.Where("user_id = ? AND store_id = ? AND keep_code = ?", user.ID, storeID, keep).Find(&items).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "Failed to load cart items", err)
+    
+    // load cart
+    var cart models.Cart
+    if err := config.DB.Where("user_id = ? AND store_id = ? AND keep_code = ?", user.ID, storeID, keep).First(&cart).Error; err != nil {
+        helpers.ErrorResponse(c, 404, "Cart not found for given keep_code", err)
         return
     }
 
-    if len(items) == 0 {
-        helpers.ErrorResponse(c, 404, "No cart items found for given keep_code", nil)
+    // load cart items to know affected products
+    var items []models.CartItem
+    if err := config.DB.Where("cart_id = ?", cart.ID).Find(&items).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to load cart items", err)
         return
     }
 
     // collect product ids
     prodIDs := make([]uint64, 0, len(items))
-    for _, it := range items {
-        prodIDs = append(prodIDs, it.ProductID)
+    if len(items) > 0 {        
+        for _, it := range items {
+            if it.Type == "product" || it.ProductID != nil {
+                prodIDs = append(prodIDs, *it.ProductID)
+            }
+        }
     }
 
     tx := config.DB.WithContext(c.Request.Context()).Begin()
-    if err := tx.Where("user_id = ? AND store_id = ? AND keep_code = ?", user.ID, storeID, keep).Delete(&models.CartItem{}).Error; err != nil {
+    if err := tx.Where("cart_id = ?", cart.ID).Delete(&models.CartItem{}).Error; err != nil {
         tx.Rollback()
         helpers.ErrorResponse(c, 500, "Failed to delete cart items", err)
+        return
+    }
+    //delete cart
+    if err := tx.Delete(&cart).Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "Failed to delete cart", err)
         return
     }
 
@@ -486,37 +629,46 @@ func RemoveCartByKeepCode(c *gin.Context) {
         return
     }
 
-    c.JSON(http.StatusOK, response.Success("Cart items removed", nil))
+    c.JSON(http.StatusOK, response.Success("Cart pending removed", nil))
 }
 func EmptyCurrentCart(c *gin.Context) {
     user := c.MustGet("auth_user").(models.User)
 
-    // load cart items
+    // load cart
+    var cart models.Cart
+    if err := config.DB.Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, *user.StoreID).Find(&cart).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to load cart", err)
+        return
+    }
     var items []models.CartItem
-    if err := config.DB.Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, *user.StoreID).Find(&items).Error; err != nil {
+    if err := config.DB.Where("cart_id = ?", cart.ID).Find(&items).Error; err != nil {
         helpers.ErrorResponse(c, 500, "Failed to load cart items", err)
-        return
-    }
-
-    if len(items) == 0 {
-        helpers.ErrorResponse(c, 400, "Cart item kosong", nil)
-        return
-    }
-
-    tx := config.DB.WithContext(c.Request.Context()).Begin()
-    // delete cart items
-    if err := tx.Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, *user.StoreID).Delete(&models.CartItem{}).Error; err != nil {
-        tx.Rollback()
-        helpers.ErrorResponse(c, 500, "Failed to delete cart items", err)
         return
     }
 
     // collect product ids
     prodIDs := make([]uint64, 0, len(items))
-    for _, it := range items {
-        prodIDs = append(prodIDs, it.ProductID)
+    if len(items) > 0 {
+        for _, it := range items {
+            if it.Type == "product" || it.ProductID != nil {
+                prodIDs = append(prodIDs, *it.ProductID)
+            }
+        }
     }
 
+    tx := config.DB.WithContext(c.Request.Context()).Begin()
+    // delete cart items
+    if err := tx.Where("cart_id = ?", cart.ID).Delete(&models.CartItem{}).Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "Failed to delete cart items", err)
+        return
+    }
+    // delete cart
+    if err := tx.Delete(&cart).Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "Failed to delete cart", err)
+        return
+    }
     // reset product status to 'display' for affected products
     if len(prodIDs) > 0 {
         if err := tx.Model(&models.Product{}).Where("id IN ?", prodIDs).Updates(map[string]interface{}{"status": "display"}).Error; err != nil {
@@ -562,8 +714,6 @@ func CheckoutTransaction(c *gin.Context) {
         // Tax float64 `json:"tax" binding:"gte=0,max=100"`
         PaymentMethod string `json:"payment_method" binding:"required,oneof=cash transfer qris"`
         PaidAmount float64 `json:"paid_amount" binding:"required,gte=0"`
-        PlasticQty uint `json:"plastic_qty"`
-        PlasticUnitPrice float64 `json:"plastic_unit_price"`
     }
 
     var p payload
@@ -622,9 +772,15 @@ func CheckoutTransaction(c *gin.Context) {
         return
     }
 
+    // load cart
+    var cart models.Cart
+    if err := config.DB.Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, storeID).Find(&cart).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to load cart", err)
+        return
+    }
     // load cart items
     var items []models.CartItem
-    if err := config.DB.Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, storeID).Find(&items).Error; err != nil {
+    if err := config.DB.Where("cart_id = ?", cart.ID).Find(&items).Error; err != nil {
         helpers.ErrorResponse(c, 500, "Failed to load cart items", err)
         return
     }
@@ -660,8 +816,6 @@ func CheckoutTransaction(c *gin.Context) {
         PaidAmount: p.PaidAmount,
         PaymentMethod: p.PaymentMethod,
         Status: "done",
-        PlasticQty: p.PlasticQty,
-        PlasticUnitPrice: p.PlasticUnitPrice,
         CreatedAt: now.UTC(),
         UpdatedAt: now.UTC(),
     }
@@ -673,35 +827,50 @@ func CheckoutTransaction(c *gin.Context) {
     }
 
     totalQty := 0
+    totalPackagingQty := uint64(0)
+    totalPackagingPrice := float64(0)
 	subTotal := float64(0)
     
     type txRowPriceModel struct {
         Name string `json:"name"`
         Price     float64  `json:"price"`
-        Quantity    int64 `json:"quantity"`
+        Quantity    uint64 `json:"quantity"`
         Total    float64 `json:"total"`
     }
-    priceMap := make(map[float64]int64)
+    priceMap := make(map[float64]uint64)
     var productIDs []uint64
+    var itemsPackaging []txRowPriceModel
     // migrate items
     for _, it := range items {
         ti := models.TransactionItem{
             StoreID: storeID,
             TransactionID: tr.ID,
-            ProductID: it.ProductID,
             ProductName: it.ProductName,
-            Quantity: int(it.Quantity),
+            Quantity: it.Quantity,
             Price: it.Price,
             DiscountPrice: it.DiscountPrice,
             Subtotal: it.Subtotal,
         }
 
-        productIDs = append(productIDs, it.ProductID)
-        priceMap[it.Price] += 1
-        // txRow = append(txRow, txRowModel{
-        //     Name:     it.ProductName,
-        //     Price:    it.Price,
-        // })
+        if it.Type == "product" {
+            ti.ProductID = it.ProductID
+            ti.PackagingID = nil
+            productIDs = append(productIDs, *it.ProductID)
+            priceMap[it.Price] += 1
+        }else {
+            totalPackagingQty += it.Quantity
+            totalPackagingPrice += it.Price * float64(it.Quantity) 
+
+            ti.PackagingID = it.PackagingID
+            ti.ProductID = nil
+
+            itemsPackaging = append(itemsPackaging, txRowPriceModel{
+                Name: it.ProductName,
+                Price: it.Price,
+                Quantity: it.Quantity,
+                Total: it.Price * float64(it.Quantity),
+            })
+        }
 
         if err := tx.Create(&ti).Error; err != nil {
             tx.Rollback()
@@ -727,9 +896,12 @@ func CheckoutTransaction(c *gin.Context) {
     sort.Slice(txRowPrice, func(i, j int) bool {
         return txRowPrice[i].Price < txRowPrice[j].Price
     })
+    //tambahkan packaging list
+    txRowPrice = append(txRowPrice, itemsPackaging...)
 
+    // hitung ppn dan total
     ppnAmount := math.Round(subTotal * (ppn.Ppn / 100))
-	totalTransaction := math.Round(subTotal + ppnAmount + (float64(p.PlasticQty) * p.PlasticUnitPrice))
+	totalTransaction := math.Round(subTotal + ppnAmount)
     totalAmount := helpers.RoundTo500(int(totalTransaction))
     roundedPrice := totalAmount - totalTransaction
 	changeAmount := tr.PaidAmount - totalAmount
@@ -741,6 +913,8 @@ func CheckoutTransaction(c *gin.Context) {
     // update transaction totals
     if err := tx.Model(&tr).Updates(map[string]interface{}{
         "tax_price": ppnAmount,
+        "total_packaging_qty": totalPackagingQty,
+        "total_packaging_price": totalPackagingPrice,
         "rounded_price": roundedPrice,
         "total_quantity": totalQty,
 		"total_amount": totalAmount,
@@ -751,11 +925,16 @@ func CheckoutTransaction(c *gin.Context) {
         helpers.ErrorResponse(c, 500, "Failed to update transaction totals", err)
         return
     }
-
     // delete cart items
-    if err := tx.Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, storeID).Delete(&models.CartItem{}).Error; err != nil {
+    if err := tx.Where("cart_id = ?", cart.ID).Delete(&models.CartItem{}).Error; err != nil {
         tx.Rollback()
-        helpers.ErrorResponse(c, 500, "Failed to clear cart", err)
+        helpers.ErrorResponse(c, 500, "Failed to delete cart item", err)
+        return
+    }
+    // delete cart
+    if err := tx.Delete(&cart).Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "Failed to delete cart", err)
         return
     }
 
@@ -811,11 +990,6 @@ func CheckoutTransaction(c *gin.Context) {
         "customer_name": member.Name,
         "total_item": tr.TotalItem,
         "total_quantity": tr.TotalQuantity,
-        "plastic": gin.H{
-            "qty": tr.PlasticQty,
-            "unit_price": tr.PlasticUnitPrice,
-            "total": float64(tr.PlasticQty) * tr.PlasticUnitPrice,
-        },
         "paid_amount": tr.PaidAmount,
         "change_amount": tr.ChangeAmount,
         "payment_method": tr.PaymentMethod,
@@ -833,7 +1007,6 @@ func CheckoutTransaction(c *gin.Context) {
             "amount": ppnAmount,
         },
         "items": txRowPrice,
-        // "items_price": txRowPrice,
     }))
 }
 func GetTransactionHistories(c *gin.Context) {
@@ -946,21 +1119,16 @@ func DetailTransaction(c *gin.Context) {
         Barcode  string  `json:"barcode"`
         ProductName     string  `json:"product_name"`
         Price    float64 `json:"price"`
-        Quantity int64   `json:"quantity"`
+        Quantity uint64   `json:"quantity"`
     }
     
-    type transactionItemPrice struct {
+    type groupingItemPrice struct {
         Name string `json:"name"`
         Price    float64 `json:"price"`
-        Quantity int64   `json:"quantity"`
+        Quantity uint64   `json:"quantity"`
         Total float64   `json:"total"`
     }
 
-    type plasticInfo struct {
-        Qty uint `json:"qty"`
-        UnitPrice float64 `json:"unit_price"`
-        Total float64 `json:"total"`
-    }
     // 🔹 Struct response
     var result struct {
         ID        uint64  `json:"id"`
@@ -970,7 +1138,8 @@ func DetailTransaction(c *gin.Context) {
         CustomerName string `json:"customer_name"`       
         TotalItem    int     `json:"total_item"`
         TotalQuantity int     `json:"total_quantity"`
-        Plastic     plasticInfo `json:"plastic"`
+        TotalPackagingQty uint    `json:"total_packaging_qty"`
+        TotalPackagingPrice float64 `json:"total_packaging_price"`
         PaidAmount float64 `json:"paid_amount"`
         ChangeAmount float64 `json:"change_amount"`
         PaymentMethod string  `json:"payment_method"`
@@ -992,16 +1161,16 @@ func DetailTransaction(c *gin.Context) {
         } `json:"ppn"`
 
         Products []transactionPerItem `json:"products"`
-        Items []transactionItemPrice `json:"items"`
+        Items []groupingItemPrice `json:"items"`
     }
 
     var tx models.Transaction
     if err := config.DB.
-        Preload("User").
-        Preload("UserCancel").
-        Preload("Member", func(db *gorm.DB) *gorm.DB {
-            return db.Unscoped()
-        }).
+        Preload("User", func(db *gorm.DB) *gorm.DB { return db.Unscoped() }).
+		Preload("UserCancel", func(db *gorm.DB) *gorm.DB { return db.Unscoped() }).
+		Preload("Member", func(db *gorm.DB) *gorm.DB { return db.Unscoped() }).
+		Preload("Items.Product").
+		Preload("Items.Packaging").
         Preload("Store").First(&tx, id).Error; err != nil {
         helpers.ErrorResponse(c, 404, "Transaction not found", err)
         return
@@ -1021,9 +1190,6 @@ func DetailTransaction(c *gin.Context) {
     result.CustomerName = tx.Member.Name
     result.TotalItem = tx.TotalItem
     result.TotalQuantity = tx.TotalQuantity
-    result.Plastic.Qty = tx.PlasticQty
-    result.Plastic.UnitPrice = tx.PlasticUnitPrice
-    result.Plastic.Total = float64(tx.PlasticQty) * tx.PlasticUnitPrice
     result.PaidAmount = tx.PaidAmount
     result.ChangeAmount = tx.ChangeAmount
     result.PaymentMethod = tx.PaymentMethod
@@ -1042,31 +1208,32 @@ func DetailTransaction(c *gin.Context) {
     result.Ppn.Amount = tx.TaxPrice
 
     // ambil per items
-    var items []transactionPerItem
-    queryItems := `
-        SELECT 
-            ti.id,
-            p.barcode,
-            ti.product_name,
-            ti.price,
-            ti.quantity
-        FROM transaction_items ti
-        LEFT JOIN products p ON p.id = ti.product_id
-        WHERE ti.transaction_id = ?
-    `
+    priceMap := make(map[float64]uint64)
+    var itemsPackaging []groupingItemPrice
+    for _, item := range tx.Items {
+        if item.ProductID != nil && item.Product != nil {            
+            result.Products = append(result.Products, transactionPerItem{
+                ID: item.ID,
+                Barcode: item.Product.Barcode,
+                ProductName: item.ProductName,
+                Price: item.Price,
+                Quantity: item.Quantity,
+            })
 
-    if err := config.DB.Raw(queryItems, id).Scan(&items).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "Failed get items", err)
-        return
+            // gourp item by price
+            priceMap[item.Price] += item.Quantity
+        }else if item.PackagingID != nil && item.Packaging != nil {
+            itemsPackaging = append(itemsPackaging, groupingItemPrice{
+                Name: item.ProductName,
+                Price: item.Price,
+                Quantity: item.Quantity,
+                Total: item.Price * float64(item.Quantity),
+            })
+        }
     }
-
-    // gourp item by price
-    priceMap := make(map[float64]int64)
-    for _, it := range items {
-        priceMap[it.Price] += it.Quantity
-    }
+    // ambil item packaging
     for price, qty := range priceMap {
-        result.Items = append(result.Items, transactionItemPrice{
+        result.Items = append(result.Items, groupingItemPrice{
             Name: formatPriceToProductName(price),
             Price:    price,
             Quantity: qty,
@@ -1077,9 +1244,8 @@ func DetailTransaction(c *gin.Context) {
     sort.Slice(result.Items, func(i, j int) bool {
         return result.Items[i].Price < result.Items[j].Price
     })
-
-    result.Products = items
-    // result.Items = itemsPrice
+    //tambahkkan packaging list
+    result.Items = append(result.Items, itemsPackaging...)
 
     c.JSON(http.StatusOK, gin.H{
         "success":  true,
@@ -1123,8 +1289,8 @@ func DetailTransactionsShift(c *gin.Context) {
     var summary struct {
         TotalInvoice int64
         TotalRounded float64
-        PlasticQty uint
-        PlasticUnitPrice float64
+        TotalPackagingQty uint
+        TotalPackagingPrice float64
         TotalAmount float64
         CashCancelled float64
 		TransferCancelled float64
@@ -1137,8 +1303,8 @@ func DetailTransactionsShift(c *gin.Context) {
             COALESCE(SUM(CASE WHEN status = 'done' THEN rounded_price ELSE 0 END),0) AS total_rounded,
             COALESCE(SUM(CASE WHEN status = 'done' THEN total_amount ELSE 0 END),0) AS total_amount,
 
-            COALESCE(SUM(CASE WHEN status = 'done' THEN plastic_qty ELSE 0 END),0) AS plastic_qty,
-			COALESCE(SUM(CASE WHEN status = 'done' THEN plastic_unit_price ELSE 0 END),0) AS plastic_unit_price,
+            COALESCE(SUM(CASE WHEN status = 'done' THEN total_packaging_qty ELSE 0 END),0) AS total_packaging_qty,
+			COALESCE(SUM(CASE WHEN status = 'done' THEN total_packaging_price ELSE 0 END),0) AS total_packaging_price,
 
             COALESCE(SUM(CASE WHEN payment_method = 'cash' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS cash_cancelled,
 			COALESCE(SUM(CASE WHEN payment_method = 'transfer' AND status = 'cancelled' THEN total_amount ELSE 0 END),0) AS transfer_cancelled,
@@ -1180,8 +1346,8 @@ func DetailTransactionsShift(c *gin.Context) {
         TotalCashCancel       float64     `json:"total_cash_cancel"`
         TotalTransferCancel       float64     `json:"total_transfer_cancel"`
         TotalQrisCancel       float64     `json:"total_qris_cancel"`
-        TotalPlasticQty uint `json:"total_plastic_qty"`
-        TotalPlasticUnitPrice float64 `json:"total_plastic_unit_price"`
+        TotalPackagingQty uint `json:"total_packaging_qty"`
+        TotalPackagingPrice float64 `json:"total_packaging_price"`
         
         TotalTax        float64    `json:"total_tax"`
         TotalSubtotal   float64    `json:"total_subtotal"`
@@ -1274,8 +1440,8 @@ func DetailTransactionsShift(c *gin.Context) {
     result.TotalCashCancel = summary.CashCancelled
     result.TotalTransferCancel = summary.TransferCancelled
     result.TotalQrisCancel = summary.QrisCancelled
-    result.TotalPlasticQty = summary.PlasticQty
-    result.TotalPlasticUnitPrice = summary.PlasticUnitPrice
+    result.TotalPackagingQty = summary.TotalPackagingQty
+    result.TotalPackagingPrice = summary.TotalPackagingPrice
     
     result.TotalTax = shift.TotalTax
     result.TotalSubtotal = shift.Subtotal
@@ -1379,7 +1545,9 @@ func CancelTransaction(c *gin.Context) {
         // restore products
         productIDs := make([]uint64, 0)
         for _, item := range tr.Items {
-            productIDs = append(productIDs, item.ProductID)
+            if item.ProductID != nil {
+                productIDs = append(productIDs, *item.ProductID)
+            }
         }
         if err := dbTx.Model(&models.Product{}).Where("id IN ?", productIDs).Update("status", "display").Error; err != nil { 
             dbTx.Rollback(); 
@@ -1488,7 +1656,9 @@ func ApprovalCancelTransaction(c *gin.Context) {
         // restore products
         productIDs := make([]uint64, 0)
         for _, item := range tr.Items {
-            productIDs = append(productIDs, item.ProductID)
+            if item.ProductID == nil {
+                productIDs = append(productIDs, *item.ProductID)
+            }
         }
         if err := dbTx.Model(&models.Product{}).Where("id IN ?", productIDs).Update("status", "display").Error; err != nil { 
             dbTx.Rollback(); 

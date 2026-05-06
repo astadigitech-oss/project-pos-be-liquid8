@@ -39,6 +39,10 @@ var seederRegistry = map[string]SeederConfig{
 		Table: "ppns",
 		Run:   func() error { return seedPPN(config.DB) },
 	},
+	"packaging": {
+		Table: "packagings",
+		Run:   func() error { return seedPackaging(config.DB) },
+	},
 }
 
 var seederOrder = []string{
@@ -46,6 +50,7 @@ var seederOrder = []string{
 	"product",
 	"user",
 	"ppn",
+	"packaging",
 }
 
 func main() {
@@ -254,7 +259,7 @@ func seedProduct(db *gorm.DB) error {
 		for i := 1; i <= 50; i++ {
 			// distribute stores 1..10
 			storeID := uint64(j)
-			barcode := fmt.Sprintf("P%d%s", j, helpers.RandomString(5))
+			barcode := fmt.Sprintf("P%d%05d", j, i)
 			prices := []float64{12000, 24000, 12000, 24000}
 			index := rand.Intn(len(prices))
 			price := prices[index]
@@ -289,6 +294,24 @@ func seedPPN(db *gorm.DB) error {
 	}
 
 	return db.Create(&ppns).Error
+}
+func seedPackaging(db *gorm.DB) error {
+	packaging := []models.Packaging{
+		{
+			Name:  "Plastik Merah UK.24",
+			Price: 500,
+		},
+		{
+			Name:  "Plastik Merah UK.35",
+			Price: 1000,
+		},
+		{
+			Name:  "Plastik Merah UK.50",
+			Price: 2000,
+		},
+	}
+
+	return db.Create(&packaging).Error
 }
 func truncateTableByClass(className string) error {
 

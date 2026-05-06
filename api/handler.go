@@ -57,13 +57,15 @@ func RouteHandler(r *gin.Engine) {
 			//========================================
 			// TRANSACTION
 			//========================================
+			// Packaging
+			rg.GET("packagings", controllers.ListPackagings) //PackagingController.go
 			// Cart / Keranjang
 			rg.GET("carts/current", middleware.ShiftCheck(), controllers.GetCurrentCart) //TransactionController.go
 			rg.GET("carts/pending", middleware.ShiftCheck(), controllers.ListPending) //TransactionController.go
 			rg.PUT("carts/:keep_code/resume-check", middleware.ShiftCheck(), controllers.ResumePendingCheck) //TransactionController.go
 			rg.POST("carts/item", middleware.ShiftCheck(), controllers.AddToCart) //TransactionController.go
 			rg.POST("carts/pending", middleware.ShiftCheck(), controllers.PendingCart) //TransactionController.go
-			rg.DELETE("carts/:cart_id", middleware.ShiftCheck(), controllers.RemoveItemCart) //TransactionController.go
+			rg.DELETE("carts/:cart_item_id", middleware.ShiftCheck(), controllers.RemoveItemCart) //TransactionController.go
 			rg.DELETE("carts/pending/:keep_code", middleware.ShiftCheck(), controllers.RemoveCartByKeepCode) //TransactionController.go
 			rg.DELETE("carts/current", controllers.EmptyCurrentCart) //TransactionController.go
 
