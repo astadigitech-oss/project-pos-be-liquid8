@@ -37,6 +37,7 @@ func AddToCart(c *gin.Context) {
     type payload struct {
         ReferenceID   string `json:"reference_id" binding:"required"`
         Type string `json:"type" binding:"required,oneof=product packaging"` // product | packaging
+        Qty   *uint64 `json:"qty"` 
     }
 
     var p payload
@@ -68,6 +69,11 @@ func AddToCart(c *gin.Context) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "Validasi gagal", "errors": errorsMap})
 		return
 	}
+
+    quantity := uint64(1)
+    if p.Qty != nil {
+        quantity = *p.Qty
+    }
 
     storeID := uint64(0)
     if user.StoreID != nil {
@@ -162,7 +168,7 @@ func AddToCart(c *gin.Context) {
 
         if err == nil {
             // sudah ada → update qty
-            newQty := existing.Quantity + 1
+            newQty := existing.Quantity + quantity
             newSubtotal := float64(newQty) * existing.Price
 
             if err := tx.Model(&existing).Updates(map[string]interface{}{
@@ -181,9 +187,9 @@ func AddToCart(c *gin.Context) {
                 PackagingID: &packaging.ID,
                 Type:    "packaging",
                 ProductName: packaging.Name,
-                Quantity:    1,
+                Quantity:    quantity,
                 Price:       packaging.Price,
-                Subtotal:    packaging.Price,
+                Subtotal:    packaging.Price * float64(quantity),
             }
 
             if err := tx.Create(&cartItem).Error; err != nil {
@@ -211,6 +217,81 @@ func AddToCart(c *gin.Context) {
     }
 
     c.JSON(http.StatusOK, response.Success("Added to cart", cartItem))
+}
+func UpdatePackagingCart(c *gin.Context) {
+    var payload struct {
+        ItemID uint64 `json:"item_id" binding:"required"`
+        Qty    uint64 `json:"qty" binding:"required,gte=1"`
+    }
+
+    if err := c.ShouldBindJSON(&payload); err != nil {
+        ve, ok := err.(validator.ValidationErrors)
+        if !ok {
+            c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Format JSON tidak valid"})
+            return
+        }
+        errorsMap := make(map[string]string)
+        for _, e := range ve {
+            switch e.Field() {
+            case "ItemID":
+                errorsMap["item_id"] = "Item ID wajib diisi"
+            case "Qty":
+                if e.Tag() == "required" {
+                    errorsMap["qty"] = "qty wajib diisi"
+                } else {
+                    errorsMap["qty"] = "qty harus >= 1"
+                }
+            default:
+                errorsMap[e.Field()] = "Validasi gagal"
+            }
+        }
+        c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "Validasi gagal", "errors": errorsMap})
+        return
+    }
+
+    // load cart item
+    var item models.CartItem
+    if err := config.DB.First(&item, payload.ItemID).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            helpers.ErrorResponse(c, 404, "Cart item tidak ditemukan", err)
+        } else {
+            helpers.ErrorResponse(c, 500, "Failed to load cart item", err)
+        }
+        return
+    }
+
+    if item.Type != "packaging" {
+        helpers.ErrorResponse(c, 422, "Cart item bukan tipe packaging", nil)
+        return
+    }
+
+    tx := config.DB.WithContext(c.Request.Context()).Begin()
+    // update qty and subtotal
+    newQty := payload.Qty
+    newSubtotal := float64(newQty) * item.Price
+
+    if err := tx.Model(&item).Updates(map[string]interface{}{
+        "quantity": newQty,
+        "subtotal": newSubtotal,
+    }).Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "Failed to update packaging item", err)
+        return
+    }
+
+    // recalculate cart totals
+    if err := helpers.RecalculateCart(tx, item.CartID); err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "Failed to recalculate cart", err)
+        return
+    }
+
+    if err := tx.Commit().Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Commit failed", err)
+        return
+    }
+
+    c.JSON(http.StatusOK, response.Success("Packaging cart updated", item))
 }
 func RemoveItemCart(c *gin.Context) {
     // user := c.MustGet("auth_user").(models.User)
