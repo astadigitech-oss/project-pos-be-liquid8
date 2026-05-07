@@ -224,23 +224,28 @@ func seedStore(db *gorm.DB) error {
 	return db.Create(&stores).Error
 }
 func seedUsers(db *gorm.DB) error {
-	password, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
-
 	var users []models.User
+
+	// Superadmin
+	superadminPassword, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
 	users = append(users, models.User{
-		Name: "Superadmin",
+		Name:     "Superadmin",
 		Username: "superadmin",
-		Password: string(password),
-		Email: "superadmin@gmail.com",
-		Role: "superadmin",
+		Password: string(superadminPassword),
+		Email:    "superadmin@gmail.com",
+		Role:     "superadmin",
 	})
+
+	// Admin
+	adminPassword, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
 	users = append(users, models.User{
-		Name: "Administrator",
+		Name:     "Administrator",
 		Username: "admin",
-		Password: string(password),
-		Email: "admin@gmail.com",
-		Role: "admin",
+		Password: string(adminPassword),
+		Email:    "admin@gmail.com",
+		Role:     "admin",
 	})
+
 	storeIDs := []uint64{1,2,3,4,5,6,7,8,9,10}
 	for _,store_id := range storeIDs {
 		users = append(users, models.User{
@@ -248,10 +253,150 @@ func seedUsers(db *gorm.DB) error {
 			StoreID: &store_id, 
 			Username: fmt.Sprintf("kasir%d",store_id), 
 			Email: fmt.Sprintf("kasir%d@gmail.com", store_id), 
-			Password: string(password), 
+			Password: string(adminPassword), 
 			Role: "kasir",
 		})
 	}
+
+	// =========================
+	// Diskonter Proklamasi
+	// =========================
+	password1, _ := bcrypt.GenerateFromPassword([]byte("Aselole1"), bcrypt.DefaultCost)
+	storeID1 := uint64(1)
+	users = append(users, models.User{
+		Name:     "Bella apriyanti",
+		StoreID:  &storeID1,
+		Username: "bella",
+		Email:    "bapriyanti98@gmail.com",
+		Password: string(password1),
+		Role:     "kasir",
+	})
+
+	// =========================
+	// Diskonter Pinang
+	// =========================
+	password2, _ := bcrypt.GenerateFromPassword([]byte("3726mdpl"), bcrypt.DefaultCost)
+	storeID2 := uint64(2)
+	users = append(users, models.User{
+		Name:     "Edelsa Rinjani Aprilia",
+		StoreID:  &storeID2,
+		Username: "edelsa",
+		Email:    "edelrinjani08@gmail.com",
+		Password: string(password2),
+		Role:     "kasir",
+	})
+
+	// =========================
+	// Diskonter Cinere
+	// =========================
+	password3, _ := bcrypt.GenerateFromPassword([]byte("Inna123"), bcrypt.DefaultCost)
+	storeID3 := uint64(3)
+	users = append(users, models.User{
+		Name:     "Inna Yunelan",
+		StoreID:  &storeID3,
+		Username: "inna",
+		Email:    "yunelan84@gmail.com",
+		Password: string(password3),
+		Role:     "kasir",
+	})
+
+	// =========================
+	// Diskonter Kayu Manis
+	// =========================
+	password4, _ := bcrypt.GenerateFromPassword([]byte("Salma224444"), bcrypt.DefaultCost)
+	storeID4 := uint64(4)
+	users = append(users, models.User{
+		Name:     "Salma Sintya",
+		StoreID:  &storeID4,
+		Username: "salma",
+		Email:    "Salmamasin03@gmail.com",
+		Password: string(password4),
+		Role:     "kasir",
+	})
+
+	// =========================
+	// Diskonter Zamrud
+	// =========================
+	password5, _ := bcrypt.GenerateFromPassword([]byte("Sucicantik123*"), bcrypt.DefaultCost)
+	storeID5 := uint64(5)
+	users = append(users, models.User{
+		Name:     "Suci",
+		StoreID:  &storeID5,
+		Username: "suci",
+		Email:    "rahmadanissuci7@gmail.com",
+		Password: string(password5),
+		Role:     "kasir",
+	})
+
+	// =========================
+	// Diskonter Bintaro
+	// =========================
+	password6, _ := bcrypt.GenerateFromPassword([]byte("salvius12"), bcrypt.DefaultCost)
+	storeID6 := uint64(6)
+	users = append(users, models.User{
+		Name:     "Ruci Wulandari",
+		StoreID:  &storeID6,
+		Username: "ruci",
+		Email:    "ruchiwulan12@gmail.com",
+		Password: string(password6),
+		Role:     "kasir",
+	})
+
+	// =========================
+	// Diskonter Pekayon
+	// =========================
+	password7, _ := bcrypt.GenerateFromPassword([]byte("Sinta11#"), bcrypt.DefaultCost)
+	storeID7 := uint64(7)
+	users = append(users, models.User{
+		Name:     "Sinta",
+		StoreID:  &storeID7,
+		Username: "sinta",
+		Email:    "sintadw00@gmail.com",
+		Password: string(password7),
+		Role:     "kasir",
+	})
+
+	// =========================
+	// Diskonter Harapan
+	// =========================
+	password8, _ := bcrypt.GenerateFromPassword([]byte("Atik@0202"), bcrypt.DefaultCost)
+	storeID8 := uint64(8)
+	users = append(users, models.User{
+		Name:     "Atikah Nuryanti",
+		StoreID:  &storeID8,
+		Username: "atikah",
+		Email:    "atikanuryanti73@gmail.com",
+		Password: string(password8),
+		Role:     "kasir",
+	})
+
+	// =========================
+	// Diskonter Loji
+	// =========================
+	password9, _ := bcrypt.GenerateFromPassword([]byte("Pwr666"), bcrypt.DefaultCost)
+	storeID9 := uint64(9)
+	users = append(users, models.User{
+		Name:     "Rike Ripani",
+		StoreID:  &storeID9,
+		Username: "rike",
+		Email:    "rikeripani306@gmail.com",
+		Password: string(password9),
+		Role:     "kasir",
+	})
+
+	// =========================
+	// Diskonter Mayor Oking
+	// =========================
+	password10, _ := bcrypt.GenerateFromPassword([]byte("Susiii2002"), bcrypt.DefaultCost)
+	storeID10 := uint64(10)
+	users = append(users, models.User{
+		Name:     "Susi Puspitasari",
+		StoreID:  &storeID10,
+		Username: "susi",
+		Email:    "susipuspitasari2323@gmail.com",
+		Password: string(password10),
+		Role:     "kasir",
+	})
 
 	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "username"}},
