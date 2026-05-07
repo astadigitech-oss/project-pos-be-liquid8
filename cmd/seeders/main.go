@@ -228,6 +228,13 @@ func seedUsers(db *gorm.DB) error {
 
 	var users []models.User
 	users = append(users, models.User{
+		Name: "Superadmin",
+		Username: "superadmin",
+		Password: string(password),
+		Email: "superadmin@gmail.com",
+		Role: "superadmin",
+	})
+	users = append(users, models.User{
 		Name: "Administrator",
 		Username: "admin",
 		Password: string(password),

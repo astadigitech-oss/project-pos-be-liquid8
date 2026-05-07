@@ -135,7 +135,6 @@ func RouteHandler(r *gin.Engine) {
 			//========================================
 			rg.GET("transactions/all", controllers.GetAllTransactions) //TransactionController.go
 			rg.GET("transactions/pending-cancel", controllers.GetPendingCancelTransactions) //TransactionController.go
-			rg.POST("transactions/:id/approve-cancel", controllers.ApprovalCancelTransaction) //TransactionController.go
 
 			//========================================
 			// SHIFT
@@ -160,6 +159,16 @@ func RouteHandler(r *gin.Engine) {
 			// INVENTORY / PRODUK
 			//========================================
 			rg.GET("products", controllers.ListAllProducts) //ProductController.go
+
+		})
+	/*======================= SUPERADMIN ONLY =======================*/
+		roleGroup(protected, []string{"superadmin"}, func(rg *gin.RouterGroup) {
+
+			//========================================
+			// TRANSACTION
+			//========================================
+			rg.POST("transactions/:id/approve-cancel", controllers.ApprovalCancelTransaction) //TransactionController.go
+
 
 		})
 	}
