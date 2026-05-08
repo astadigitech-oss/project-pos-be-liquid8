@@ -322,12 +322,8 @@ func GetShiftsByCashier(c *gin.Context) {
 	var rows []shiftRow
 
 	// build base where
-	whereClauses := "(shifts.open_by = ? OR shifts.status = 'open')"
-	args := []interface{}{user.ID}
-	if user.StoreID != nil {
-		whereClauses += " AND shifts.store_id = ?"
-		args = append(args, *user.StoreID)
-	}
+	whereClauses := "(shifts.open_by = ? OR shifts.status = 'open') AND shifts.store_id = ?"
+	args := []interface{}{user.ID, *user.StoreID}
 
 	var startUTC, endUTC *time.Time
 	if startDateQuery != "" {

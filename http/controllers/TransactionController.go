@@ -556,7 +556,8 @@ func GetCurrentCart(c *gin.Context) {
 
     //load cart 
     var cart models.Cart
-    if err := config.DB.Where("user_id = ? AND store_id = ? AND (keep_code IS NULL OR keep_code = '')", user.ID, storeID).First(&cart).Error; err != nil {
+    if err := config.DB.Preload("Member").
+        Where("user_id = ? AND store_id = ? AND (keep_code IS NULL OR keep_code = '')", user.ID, storeID).First(&cart).Error; err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
             payload := gin.H{
                 "products": nil,
@@ -567,6 +568,7 @@ func GetCurrentCart(c *gin.Context) {
                     "tax": ppn.Ppn,
                     "amount": 0,
                 },
+                "member": nil,
                 "total_amount": 0,
                 "pembulatan": 0,
             }
@@ -655,6 +657,14 @@ func GetCurrentCart(c *gin.Context) {
     totalAmount := helpers.RoundTo500(int(totalBelanja))
     pembulatan := totalAmount - totalBelanja
 
+    var member *map[string]interface{}
+    if cart.Member != nil {
+        member = &map[string]interface{}{
+            "id":   cart.Member.ID,
+            "name": cart.Member.Name,
+        }
+    }
+
     payload := gin.H{
         "products": items,
         "items": itemsPrice,
@@ -664,6 +674,7 @@ func GetCurrentCart(c *gin.Context) {
             "tax": ppn.Ppn,
             "amount": ppn_price,
         },
+        "member": member,
         "total_amount": totalAmount,
         "pembulatan": pembulatan,
     }
@@ -1154,8 +1165,8 @@ func GetTransactionHistories(c *gin.Context) {
     startDate = startDate.UTC()
     endDate = endDate.UTC()
 
-    baseWhere := "WHERE t.created_at >= ? AND t.created_at <= ?"
-    args := []interface{}{startDate, endDate}
+    baseWhere := "WHERE t.store_id = ? AND t.created_at >= ? AND t.created_at <= ?"
+    args := []interface{}{*user.StoreID, startDate, endDate}
     if q != "" {
         like := "%"+q+"%"
         baseWhere += " AND (t.invoice LIKE ? OR u.name LIKE ? OR s.store_name LIKE ?)"
