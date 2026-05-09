@@ -490,7 +490,8 @@ func ResumePendingCheck(c *gin.Context) {
 
     keep := c.Param("keep_code")
 	var existing models.Cart
-    if err := config.DB.Where("keep_code = ? AND store_id = ?", keep, storeID).First(&existing).Error; err != nil {
+    if err := config.DB.Preload("Member").
+        Where("keep_code = ? AND store_id = ?", keep, storeID).First(&existing).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			helpers.ErrorResponse(c, 404, "Tidak ada cart yang ditemukan", nil)
 		}else {
@@ -519,29 +520,31 @@ func ResumePendingCheck(c *gin.Context) {
 		return
 	}
 
-	var cart_items []models.CartItem
-	if err := config.DB.Where("cart_id = ?", existing.ID).Find(&cart_items).Error; err != nil {
-		helpers.ErrorResponse(c, 500, "Internal server error", err)
+    //load ppn
+    var ppn models.Ppn
+    if err := config.DB.Where("is_tax_default = ?", true).First(&ppn).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            helpers.ErrorResponse(c, 404, "PPN tidak ditemukan", nil)
+        } else {
+            helpers.ErrorResponse(c, 500, "Internal server error", err)
+        }
+        return     
+    }
+
+    payload, err := buildCartResponse(existing, ppn)
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Failed build cart", err)
 		return
 	}
 
-    c.JSON(http.StatusOK, response.Success("Resume transaksi berhasil", cart_items))
+    payload["member_id"] = existing.MemberID
+
+    c.JSON(http.StatusOK, response.Success("Resume transaksi berhasil", payload))
 }
 func GetCurrentCart(c *gin.Context) {
     user := c.MustGet("auth_user").(models.User)
     storeID := uint64(0)
     if user.StoreID != nil { storeID = *user.StoreID } else { helpers.ErrorResponse(c, 422, "User tidak memiliki store ID", nil); return }
-
-    type cartItemResponse struct {
-        ID            uint64  `json:"id"`
-        ProductID     uint64  `json:"product_id"`
-        Barcode       string  `json:"barcode"`
-        ProductName   string  `json:"product_name"`
-        Quantity      uint64   `json:"quantity"`
-        Price         float64 `json:"price"`
-        DiscountPrice float64 `json:"discount_price"`
-        Subtotal      float64 `json:"subtotal"`
-    }
 
     //load ppn
     var ppn models.Ppn
@@ -556,8 +559,7 @@ func GetCurrentCart(c *gin.Context) {
 
     //load cart 
     var cart models.Cart
-    if err := config.DB.Preload("Member").
-        Where("user_id = ? AND store_id = ? AND (keep_code IS NULL OR keep_code = '')", user.ID, storeID).First(&cart).Error; err != nil {
+    if err := config.DB.Where("user_id = ? AND store_id = ? AND (keep_code IS NULL OR keep_code = '')", user.ID, storeID).First(&cart).Error; err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
             payload := gin.H{
                 "products": nil,
@@ -580,104 +582,11 @@ func GetCurrentCart(c *gin.Context) {
         return
     }
 
-    var cartItems []models.CartItem
-    var items []cartItemResponse
-    err := config.DB.Model(&models.CartItem{}).
-        Preload("Product").Preload("Packaging").
-        Where("cart_id = ?", cart.ID).
-        Find(&cartItems).Error
-
-    if err != nil {
-        helpers.ErrorResponse(c, 500, "Failed to load current cart", err)
-        return
-    }
-
-    type txRowPriceModel struct {
-        Name string `json:"name"`
-        Price     float64  `json:"price"`
-        Quantity    int64 `json:"quantity"`
-        Total    float64 `json:"total"`
-    }
-    type txPackagingModel struct {
-        ID uint64 `json:"id"`
-        Name string `json:"name"`
-        Price     float64  `json:"price"`
-        Quantity    uint64 `json:"quantity"`
-        Total    float64 `json:"total"`
-    }
-
-    //item packaging
-    var itemsPackaging []txPackagingModel
-    priceMap := make(map[float64]int64)
-    for _, it := range cartItems {
-        
-        if it.Type == "product" && it.Product != nil {
-            priceMap[it.Price] += 1
-            items = append(items, cartItemResponse{
-                ID: it.ID,
-                ProductID: *it.ProductID,
-                Barcode: it.Product.Barcode,
-                ProductName: it.Product.Name,
-                Quantity: it.Quantity,
-                Price: it.Price,
-                DiscountPrice: it.DiscountPrice,
-                Subtotal: it.Subtotal,
-            })
-        }else if it.Type == "packaging" && it.Packaging != nil {
-            itemsPackaging = append(itemsPackaging, txPackagingModel{
-                ID: it.ID,
-                Name: it.Packaging.Name,
-                Price: it.Price,
-                Quantity: it.Quantity,
-                Total: it.Price * float64(it.Quantity),
-            })
-        }else {
-            helpers.ErrorResponse(c, 500, "Unknown cart item type", fmt.Errorf("unknown cart item type: %s", it.Type))
-            return
-        }
-    }
-
-    //grouping item berdasarkan harga (untuk kebutuhan struk nanti)
-    var itemsPrice []txRowPriceModel
-    for price, qty := range priceMap {
-        itemsPrice = append(itemsPrice, txRowPriceModel{
-            Name: formatPriceToProductName(price),
-            Price:    price,
-            Quantity: qty,
-            Total: price * float64(qty),
-        })
-    }
-    // sorting dari harga terendah
-    sort.Slice(itemsPrice, func(i, j int) bool {
-        return itemsPrice[i].Price < itemsPrice[j].Price
-    })
-
-    ppn_price := math.Round(cart.GrandTotal * (ppn.Ppn / 100))
-    totalBelanja := math.Round(cart.GrandTotal + ppn_price)
-    totalAmount := helpers.RoundTo500(int(totalBelanja))
-    pembulatan := totalAmount - totalBelanja
-
-    var member *map[string]interface{}
-    if cart.Member != nil {
-        member = &map[string]interface{}{
-            "id":   cart.Member.ID,
-            "name": cart.Member.Name,
-        }
-    }
-
-    payload := gin.H{
-        "products": items,
-        "items": itemsPrice,
-        "items_packaging": itemsPackaging,
-        "subtotal": cart.GrandTotal,
-        "ppn": gin.H{
-            "tax": ppn.Ppn,
-            "amount": ppn_price,
-        },
-        "member": member,
-        "total_amount": totalAmount,
-        "pembulatan": pembulatan,
-    }
+    payload, err := buildCartResponse(cart, ppn)
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Failed build cart", err)
+		return
+	}
 
     c.JSON(http.StatusOK, response.Success("Current cart", payload))
 }
@@ -2039,4 +1948,115 @@ func formatPriceToProductName(price float64) string {
 	}
 
 	return fmt.Sprintf("Produk %d Rupiah", sisa)
+}
+
+func buildCartResponse(cart models.Cart, ppn models.Ppn) (gin.H, error) {
+	type cartItemResponse struct {
+		ID            uint64  `json:"id"`
+		ProductID     uint64  `json:"product_id"`
+		Barcode       string  `json:"barcode"`
+		ProductName   string  `json:"product_name"`
+		Quantity      uint64  `json:"quantity"`
+		Price         float64 `json:"price"`
+		DiscountPrice float64 `json:"discount_price"`
+		Subtotal      float64 `json:"subtotal"`
+	}
+
+	type txRowPriceModel struct {
+		Name     string  `json:"name"`
+		Price    float64 `json:"price"`
+		Quantity int64   `json:"quantity"`
+		Total    float64 `json:"total"`
+	}
+
+	type txPackagingModel struct {
+		ID       uint64  `json:"id"`
+		Name     string  `json:"name"`
+		Price    float64 `json:"price"`
+		Quantity uint64  `json:"quantity"`
+		Total    float64 `json:"total"`
+	}
+
+	var cartItems []models.CartItem
+	err := config.DB.Model(&models.CartItem{}).
+		Preload("Product").
+		Preload("Packaging").
+		Where("cart_id = ?", cart.ID).
+		Find(&cartItems).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	var items []cartItemResponse
+	var itemsPackaging []txPackagingModel
+	priceMap := make(map[float64]int64)
+
+	for _, it := range cartItems {
+
+		if it.Type == "product" && it.Product != nil {
+
+			priceMap[it.Price] += 1
+
+			items = append(items, cartItemResponse{
+				ID:            it.ID,
+				ProductID:     *it.ProductID,
+				Barcode:       it.Product.Barcode,
+				ProductName:   it.Product.Name,
+				Quantity:      it.Quantity,
+				Price:         it.Price,
+				DiscountPrice: it.DiscountPrice,
+				Subtotal:      it.Subtotal,
+			})
+
+		} else if it.Type == "packaging" && it.Packaging != nil {
+
+			itemsPackaging = append(itemsPackaging, txPackagingModel{
+				ID:       it.ID,
+				Name:     it.Packaging.Name,
+				Price:    it.Price,
+				Quantity: it.Quantity,
+				Total:    it.Price * float64(it.Quantity),
+			})
+
+		} else {
+			return nil, fmt.Errorf("unknown cart item type: %s", it.Type)
+		}
+	}
+
+	var itemsPrice []txRowPriceModel
+
+	for price, qty := range priceMap {
+		itemsPrice = append(itemsPrice, txRowPriceModel{
+			Name:     formatPriceToProductName(price),
+			Price:    price,
+			Quantity: qty,
+			Total:    price * float64(qty),
+		})
+	}
+
+	sort.Slice(itemsPrice, func(i, j int) bool {
+		return itemsPrice[i].Price < itemsPrice[j].Price
+	})
+
+	ppnPrice := math.Round(cart.GrandTotal * (ppn.Ppn / 100))
+	totalBelanja := math.Round(cart.GrandTotal + ppnPrice)
+	totalAmount := helpers.RoundTo500(int(totalBelanja))
+	pembulatan := totalAmount - totalBelanja
+
+
+	payload := gin.H{
+		"products": items,
+		"items": itemsPrice,
+		"items_packaging": itemsPackaging,
+		"subtotal": cart.GrandTotal,
+		"ppn": gin.H{
+			"tax":   ppn.Ppn,
+			"amount": ppnPrice,
+		},
+		"total_amount": totalAmount,
+		"pembulatan": pembulatan,
+	}
+
+	return payload, nil
 }
