@@ -23,6 +23,7 @@ import (
 )
 
 func GetUsers(c *gin.Context) {
+	user := c.MustGet("auth_user").(models.User)
 	q := strings.TrimSpace(c.Query("q"))
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -52,7 +53,10 @@ func GetUsers(c *gin.Context) {
 		s.store_name
 	`).
 	Joins("LEFT JOIN store_profiles s ON s.id = u.store_id").
-	Where("role NOT IN ?", []string{"superadmin", "admin"})
+	Where("role != ?", "superadmin")
+	if user.Role == "admin" {
+		query = query.Where("role != ?", "admin")
+	}
 
 	// Searching (misalnya, mencari berdasarkan nama atau email)
 	if q != "" {
@@ -210,18 +214,30 @@ func CreateUser(c *gin.Context) {
 
 	// CEK EMAIL SUDAH ADA
 	// =========================
-	var count int64
+	var userOther models.User
 	if err := config.DB.
 		Model(&models.User{}).
-		Where("email = ?", req.Email).
-		Count(&count).Error; err != nil {
+		Where("email = ? OR username = ?", req.Email, req.Username).
+		First(&userOther).Error; err != nil {
 
-		helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal memeriksa email", err)
-		return
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal memeriksa email", err)
+			return
+		}
+
 	}
 
-	if count > 0 {
-		helpers.ErrorResponse(c, http.StatusBadRequest, "Email sudah terdaftar", nil)
+	if userOther.Email == req.Email {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  false,
+			"message": "Email sudah digunakan",
+		})
+		return
+	}else if userOther.Username == req.Username {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  false,
+			"message": "Username sudah digunakan",
+		})
 		return
 	}
 
@@ -362,9 +378,10 @@ func UpdateUser(c *gin.Context) {
 		Model(&models.User{}).
 		Where("(email = ? OR username = ?) AND id != ?", req.Email, req.Username, user.ID).
 		First(&userOther).Error; err != nil {
-
-		helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal memeriksa email", err)
-		return
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			helpers.ErrorResponse(c, http.StatusInternalServerError, "Gagal memeriksa email", err)
+			return
+		}
 	}
 
 	if userOther.Email == req.Email {
