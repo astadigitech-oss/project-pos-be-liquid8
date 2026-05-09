@@ -92,7 +92,7 @@ func RouteHandler(r *gin.Engine) {
 		//========================================
 		protected.GET("transactions/:id", controllers.DetailTransaction) //TransactionController.go
 		protected.GET("shifts/:shift_id/transaction", controllers.DetailTransactionsShift) //TransactionController.go
-		protected.DELETE("transactions/:id", controllers.CancelTransaction) //TransactionController.go
+		protected.DELETE("transactions/:id", middleware.RoleCheck([]string{"superadmin","kasir"}), controllers.CancelTransaction) //TransactionController.go
 		
 		//========================================
 		// USER
@@ -134,7 +134,6 @@ func RouteHandler(r *gin.Engine) {
 			// TRANSACTION
 			//========================================
 			rg.GET("transactions/all", controllers.GetAllTransactions) //TransactionController.go
-			rg.GET("transactions/pending-cancel", controllers.GetPendingCancelTransactions) //TransactionController.go
 
 			//========================================
 			// SHIFT

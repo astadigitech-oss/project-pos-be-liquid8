@@ -1741,104 +1741,6 @@ func ApprovalCancelTransaction(c *gin.Context) {
 
     c.JSON(http.StatusOK, response.Success("Transaction cancelled successfully", tr))
 }
-func GetPendingCancelTransactions(c *gin.Context) {
-    store_id := strings.TrimSpace(c.DefaultQuery("store_id", ""))
-    q := strings.TrimSpace(c.DefaultQuery("q", ""))
-    page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-    limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
-    if page < 1 { page = 1 }
-    offset := (page-1)*limit
-
-    var store models.StoreProfile
-
-    type txRow struct {
-        ID uint64 `json:"id"`
-        Invoice string `json:"invoice"`
-        TotalItem int `json:"total_item"`
-        TotalQuantity int `json:"total_quantity"`
-        CustomerName string `json:"customer_name"`
-        // Kasir string `json:"kasir"`
-        StoreName string `json:"store_name"`
-        Subtotal float64 `json:"subtotal"`
-        Tax float64 `json:"tax"`
-        TotalAmount float64 `json:"total_amount"`
-        Status string `json:"status"`
-        PaymentMethod string `json:"payment_method"`
-        CreatedAt time.Time `json:"created_at"`
-    }
-
-    var rows []txRow
-
-    baseWhere := "WHERE 1=1 AND t.status = 'pending_cancel'"
-    args := []interface{}{}
-
-    if store_id != "" {
-        storeID, _ := strconv.Atoi(store_id)
-        if err := config.DB.First(&store, storeID).Error; err != nil {
-            helpers.ErrorResponse(c, 404, "store not found", err)
-            return
-        }
-
-        baseWhere += " AND t.store_id = ?"
-        args = append(args, store.ID)
-    }
-
-    if q != "" {
-        like := "%"+q+"%"
-        baseWhere += " AND (t.invoice LIKE ? OR m.name LIKE ? OR s.store_name LIKE ?)"
-        args = append(args, like, like, like, like)
-    }
-
-    var total int64
-    countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM transactions t LEFT JOIN users u ON u.id = t.user_id LEFT JOIN members m ON m.id = t.member_id LEFT JOIN store_profiles s ON s.id = t.store_id LEFT JOIN shifts sh ON sh.id = t.shift_id %s`, baseWhere)
-    if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "Failed to count transactions", err)
-        return
-    }
-
-    dataSQL := fmt.Sprintf(`
-        SELECT
-            t.id,
-            t.invoice,
-            t.total_item,
-            t.total_quantity,
-            COALESCE(m.name, '') AS customer_name,
-            COALESCE(s.store_name, '') AS store_name,
-            t.subtotal,
-            COALESCE(t.tax_price, 0) AS tax,
-            t.total_amount,
-            t.status,
-            t.payment_method,
-            t.created_at
-        FROM transactions t
-        LEFT JOIN members m ON m.id = t.member_id
-        LEFT JOIN store_profiles s ON s.id = t.store_id
-        %s
-        ORDER BY t.created_at DESC
-        LIMIT ? OFFSET ?`, baseWhere)
-
-    args = append(args, limit, offset)
-    if err := config.DB.Raw(dataSQL, args...).Scan(&rows).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "Failed to fetch transactions", err)
-        return
-    }
-
-    lastPage := int(math.Ceil(float64(total)/float64(limit)))
-    pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(total))
-
-    for i := range rows {
-        rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, "Asia/Jakarta")
-    }
-
-    c.JSON(http.StatusOK, gin.H{
-        "success": true,
-        "message": "List semua transaksi",
-        "resource": gin.H{
-            "data": rows,
-            "pagination": pagination,
-        },
-    })
-}
 func GetAllTransactions(c *gin.Context) {
     store_id := strings.TrimSpace(c.DefaultQuery("store_id", ""))
     status := strings.TrimSpace(c.DefaultQuery("status", ""))
@@ -1918,7 +1820,13 @@ func GetAllTransactions(c *gin.Context) {
         LEFT JOIN members m ON m.id = t.member_id
         LEFT JOIN store_profiles s ON s.id = t.store_id
         %s
-        ORDER BY t.created_at DESC
+        ORDER BY 
+            CASE 
+                WHEN t.status = 'pending_cancel' THEN 1
+                WHEN t.status = 'done' THEN 2
+                ELSE 3
+            END,
+            t.created_at DESC
         LIMIT ? OFFSET ?`, baseWhere)
 
     args = append(args, limit, offset)
