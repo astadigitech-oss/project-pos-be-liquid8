@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 //=========================== cart item ======================
@@ -795,15 +796,22 @@ func CheckoutTransaction(c *gin.Context) {
         return
     }
 
+    
+    tx := config.DB.WithContext(c.Request.Context()).Begin()
     // load cart
     var cart models.Cart
-    if err := config.DB.Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, storeID).Find(&cart).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "Failed to load cart", err)
+    if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+        Where("user_id = ? AND store_id = ? AND keep_code IS NULL", user.ID, storeID).First(&cart).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            helpers.ErrorResponse(c, 404, "Cart not found", nil)
+        } else {
+            helpers.ErrorResponse(c, 500, "Failed to load cart", err)
+        }
         return
     }
     // load cart items
     var items []models.CartItem
-    if err := config.DB.Where("cart_id = ?", cart.ID).Find(&items).Error; err != nil {
+    if err := tx.Where("cart_id = ?", cart.ID).Find(&items).Error; err != nil {
         helpers.ErrorResponse(c, 500, "Failed to load cart items", err)
         return
     }
@@ -813,7 +821,6 @@ func CheckoutTransaction(c *gin.Context) {
         return
     }
 
-    tx := config.DB.WithContext(c.Request.Context()).Begin()
     // create transaction
     invoice, err := helpers.GenerateInvoice(tx, storeID)
 	if err != nil {
@@ -1004,6 +1011,7 @@ func CheckoutTransaction(c *gin.Context) {
         helpers.ErrorResponse(c, 500, "Commit failed", err)
         return
     }
+    
 
     c.JSON(http.StatusOK, response.Success("Transaction saved", gin.H{
         "id": tr.ID,
@@ -1833,6 +1841,7 @@ func GetPendingCancelTransactions(c *gin.Context) {
 }
 func GetAllTransactions(c *gin.Context) {
     store_id := strings.TrimSpace(c.DefaultQuery("store_id", ""))
+    status := strings.TrimSpace(c.DefaultQuery("status", ""))
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
     limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
@@ -1859,8 +1868,13 @@ func GetAllTransactions(c *gin.Context) {
 
     var rows []txRow
 
-    baseWhere := "WHERE 1=1 AND t.status IN ('done', 'cancelled')"
+    baseWhere := "WHERE 1=1"
     args := []interface{}{}
+
+    if status != ""  {
+        baseWhere += " AND t.status = ?"
+        args = append(args, status)
+    }
 
     if store_id != "" {
         storeID, _ := strconv.Atoi(store_id)
