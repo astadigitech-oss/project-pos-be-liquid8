@@ -112,7 +112,7 @@ func AddToCart(c *gin.Context) {
     var cartItem models.CartItem
     if p.Type == "product" {
         var product models.Product
-		if err := tx.Where("barcode = ? AND store_id = ? AND deleted_at IS NULL", p.ReferenceID, storeID).
+		if err := tx.Where("(barcode = ? OR old_barcode = ?) AND store_id = ? AND deleted_at IS NULL", p.ReferenceID, p.ReferenceID, storeID).
 			First(&product).Error; err != nil {
 			tx.Rollback()
 			helpers.ErrorResponse(c, 404, "Product tidak ditemukan", err)
