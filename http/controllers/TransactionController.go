@@ -1546,12 +1546,10 @@ func CancelTransaction(c *gin.Context) {
         helpers.ErrorResponse(c, 500, "Failed to load shift", err); 
         return 
     }
-    // jika user role kasir, pastikan shift masih open
-    if user.Role == "kasir" {        
-        if shift.Status != "open" { 
-            helpers.ErrorResponse(c, 422, "Shift already closed; cannot cancel transaction", nil); 
-            return 
-        }
+    // pastikan shift masih open
+    if shift.Status != "open" { 
+        helpers.ErrorResponse(c, 422, "Shift already closed; cannot cancel transaction", nil); 
+        return 
     }
 
 //UPDATE TRANSACTION STATUS
@@ -1565,7 +1563,8 @@ func CancelTransaction(c *gin.Context) {
     if user.Role == "kasir" {
         updates["status"] = "pending_cancel"
     }
-    if err := dbTx.Model(&tr).Updates(updates).Error; err != nil { 
+    if err := dbTx.Clauses(clause.Locking{Strength: "UPDATE"}).
+        Model(&tr).Updates(updates).Error; err != nil { 
         dbTx.Rollback(); 
         helpers.ErrorResponse(c, 500, "Failed to cancel tx", err); 
         return 
@@ -1593,8 +1592,8 @@ func CancelTransaction(c *gin.Context) {
         }
 
         ExpectedAmount := shift.InitialCash + summary["total_amount"].(float64)
-        ExpectedCash := summary["cash"].(float64) + shift.InitialCash
-        diff := shift.ActualCash - ExpectedCash
+        // ExpectedCash := summary["cash"].(float64) + shift.InitialCash
+        // diff := shift.ActualCash - ExpectedCash
 
         updates := map[string]interface{}{
             "total_cash": summary["cash"].(float64),
@@ -1604,10 +1603,7 @@ func CancelTransaction(c *gin.Context) {
 
             "subtotal": summary["subtotal"].(float64),
             "expected_amount": ExpectedAmount,
-        }
-
-        if shift.Status == "closed" {
-            updates["difference"] = diff
+            // "difference": diff,
         }
 
         if err := config.DB.Model(&shift).Updates(updates).Error; err != nil {

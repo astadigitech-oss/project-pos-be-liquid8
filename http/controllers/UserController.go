@@ -53,6 +53,7 @@ func GetUsers(c *gin.Context) {
 		s.store_name
 	`).
 	Joins("LEFT JOIN store_profiles s ON s.id = u.store_id").
+	Where("u.deleted_at IS NULL").
 	Where("role != ?", "superadmin")
 	if user.Role == "admin" {
 		query = query.Where("role != ?", "admin")
