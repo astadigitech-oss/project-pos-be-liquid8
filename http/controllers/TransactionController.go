@@ -1575,7 +1575,7 @@ func CancelTransaction(c *gin.Context) {
         // restore products
         productIDs := make([]uint64, 0)
         for _, item := range tr.Items {
-            if item.ProductID != nil {
+            if item.ProductID != nil && item.Type == "product" {
                 productIDs = append(productIDs, *item.ProductID)
             }
         }
@@ -1683,7 +1683,7 @@ func ApprovalCancelTransaction(c *gin.Context) {
         // restore products
         productIDs := make([]uint64, 0)
         for _, item := range tr.Items {
-            if item.ProductID == nil {
+            if item.Type == "product" && item.ProductID != nil {
                 productIDs = append(productIDs, *item.ProductID)
             }
         }
