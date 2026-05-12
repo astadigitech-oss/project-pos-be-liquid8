@@ -1816,11 +1816,10 @@ func GetAllTransactions(c *gin.Context) {
         LEFT JOIN members m ON m.id = t.member_id
         LEFT JOIN store_profiles s ON s.id = t.store_id
         %s
-        ORDER BY 
+        ORDER BY
             CASE 
                 WHEN t.status = 'pending_cancel' THEN 1
-                WHEN t.status = 'done' THEN 2
-                ELSE 3
+                ELSE 2
             END,
             t.created_at DESC
         LIMIT ? OFFSET ?`, baseWhere)
