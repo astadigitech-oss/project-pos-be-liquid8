@@ -63,7 +63,7 @@ func ListAllProducts(c *gin.Context) {
     if q != "" {
         like := "%" + q + "%"
         baseWhere += " AND (p.name LIKE ? OR p.barcode LIKE ? OR p.old_barcode LIKE ? OR s.store_name LIKE ?)"
-        args = append(args, like, like, like)
+        args = append(args, like, like, like, like)
     }
 
     // count
