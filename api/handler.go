@@ -22,6 +22,7 @@ func RouteHandler(r *gin.Engine) {
 	//========================================
 	// AUTH
 	//========================================
+
 	api.GET("/checkLogin", controllers.CheckToken) //AuthController.go
 	api.POST("/login", controllers.Login) //AuthController.go
 	api.POST("/logout", controllers.Logout) //AuthController.go
@@ -125,6 +126,7 @@ func RouteHandler(r *gin.Engine) {
 			rg.GET("stores", controllers.ListStores) //StoreController.go
 			rg.GET("stores-dropdown", controllers.ListStoresDropdown) //StoreController.go
 			rg.GET("stores/:id", controllers.DetailStore) //StoreController.go
+			rg.GET("stores/:id/export", controllers.ExportDetailStore) //StoreController.go
 			rg.GET("stores/:id/sales-period", controllers.GetSalePeriodStore) //StoreController.go
 			rg.GET("stores/:id/shift-histories", controllers.StoreShiftsHistories) //StoreController.go
 			rg.POST("stores", controllers.CreateStore) //StoreController.go
@@ -134,6 +136,7 @@ func RouteHandler(r *gin.Engine) {
 			// TRANSACTION
 			//========================================
 			rg.GET("transactions/all", controllers.GetAllTransactions) //TransactionController.go
+			rg.GET("transactions/export", controllers.ExportTransactions) //TransactionController.go
 
 			//========================================
 			// SHIFT

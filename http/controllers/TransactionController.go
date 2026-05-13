@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -1845,6 +1848,187 @@ func GetAllTransactions(c *gin.Context) {
             "pagination": pagination,
         },
     })
+}
+// removed duplicate stub
+
+// ExportTransactions: export transactions to XLSX using excelize.
+// If store_id provided, export only that store to single sheet; otherwise export all stores, one sheet per store.
+func ExportTransactions(c *gin.Context) {
+    storeIDStr := strings.TrimSpace(c.DefaultQuery("store_id", ""))
+
+    // helper to write rows to sheet
+    writeSheet := func(f *excelize.File, sheet string, rows [][]interface{}) error {
+        // create sheet if not default
+        if sheet != "Sheet1" {
+            f.NewSheet(sheet)
+        }
+        // header style
+        headers := []string{"ID", "Invoice", "Store", "Kasir", "Member", "Total Item", "Subtotal", "Tax", "Pembulatan", "Total Amount", "Payment Method", "Status", "Transaction Date"}
+        for i, h := range headers {
+            cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+            if err := f.SetCellValue(sheet, cell, h); err != nil { return err }
+        }
+
+        for rIdx, r := range rows {
+            for cIdx, v := range r {
+                cell, _ := excelize.CoordinatesToCellName(cIdx+1, rIdx+2)
+                if err := f.SetCellValue(sheet, cell, v); err != nil { return err }
+            }
+        }
+        // optional: autosize columns 1..len(headers)
+        headerStyle, _ := helpers.BuildStyle(f, config.ExcelStyles["fill_gray"], config.ExcelStyles["font_bold"])
+        for i := 1; i <= len(headers); i++ {
+            col, _ := excelize.ColumnNumberToName(i)
+            if i > 1 {
+                f.SetColWidth(sheet, col, col, 18)
+            }
+
+            f.SetCellStyle(sheet, fmt.Sprintf("%s1", col), fmt.Sprintf("%s1", col), headerStyle)
+        }
+
+        return nil
+    }
+
+    file := excelize.NewFile()
+    // fetch list of stores to export (if storeID specified, just that store)
+    var stores []models.StoreProfile
+    filename := "transactions.xlsx"
+    if storeIDStr != "" {
+        sid, _ := strconv.Atoi(storeIDStr)
+        var s models.StoreProfile
+        if err := config.DB.First(&s, sid).Error; err != nil {
+            helpers.ErrorResponse(c, 404, "store not found", err)
+            return
+        }
+        stores = append(stores, s)
+        filename = fmt.Sprintf("transactions_%s.xlsx", strings.ToLower(s.StoreName))
+        filename = strings.ReplaceAll(filename, " ", "_")
+    } else {
+        if err := config.DB.Find(&stores).Error; err != nil {
+            helpers.ErrorResponse(c, 500, "failed to fetch stores", err)
+            return
+        }
+    }
+
+    for si, s := range stores {
+        sheetName := s.StoreName
+        // Excel sheet names max 31 chars; truncate
+        if len(sheetName) > 30 {
+            sheetName = sheetName[:30]
+        }
+        // collect transactions for this store
+        txWhere := "WHERE t.store_id = ?"
+        txArgs := []interface{}{s.ID}
+
+        dataSQL := `
+            SELECT
+                t.id,
+                t.invoice,
+                COALESCE(u.name,'') as kasir,
+                COALESCE(m.name,'') as member_name,
+                t.total_item,
+                COALESCE(t.subtotal,0) as subtotal,
+                COALESCE(t.tax_price,0) as tax,
+                COALESCE(t.rounded_price,0) as pembulatan,
+                COALESCE(t.total_amount,0) as total_amount,
+                t.payment_method,
+                t.status,
+                t.created_at
+            FROM transactions t
+            LEFT JOIN users u ON u.id = t.user_id
+            LEFT JOIN members m ON m.id = t.member_id
+            ` + txWhere + `
+            ORDER BY t.created_at ASC
+        `
+
+        type rowType struct {
+            ID uint64
+            Invoice string
+            Kasir string
+            Member string
+            TotalItem int
+            Subtotal float64
+            Tax float64
+            Pembulatan float64
+            TotalAmount float64
+            PaymentMethod string
+            Status string
+            CreatedAt time.Time
+        }
+
+        var rowsData []rowType
+        if err := config.DB.Raw(dataSQL, txArgs...).Scan(&rowsData).Error; err != nil {
+            helpers.ErrorResponse(c, 500, "failed to fetch transactions for export", err)
+            return
+        }
+
+        // build rows
+        rows := make([][]interface{}, 0, len(rowsData))
+        for _, r := range rowsData {
+            rows = append(rows, []interface{}{
+                r.ID,
+                r.Invoice,
+                s.StoreName,
+                r.Kasir,
+                r.Member,
+                r.TotalItem,
+                r.Subtotal,
+                r.Tax,
+                r.Pembulatan,
+                r.TotalAmount,
+                r.PaymentMethod,
+                r.Status,
+                helpers.ToLocalTime(r.CreatedAt, s.Timezone).Format("2006-01-02 15:04:05"),
+            })
+        }
+
+        if si == 0 {
+            // first sheet is default 'Sheet1' — rename it
+            file.SetSheetName("Sheet1", sheetName)
+        }
+        if err := writeSheet(file, sheetName, rows); err != nil {
+            helpers.ErrorResponse(c, 500, "failed to write excel sheet", err)
+            return
+        }
+    }
+
+    // set active sheet to first store
+    if len(stores) > 0 {
+        first := stores[0].StoreName
+        if len(first) > 30 { 
+            first = first[:30] 
+        }
+        idx, _ := file.GetSheetIndex(first)
+        file.SetActiveSheet(idx)
+    }
+
+    // Save file
+	dir := "./public/exports"
+	os.MkdirAll(dir, 0755)
+
+	fullPath := filepath.Join(dir, filename)
+	if err := file.SaveAs(fullPath); err != nil {
+		helpers.ErrorResponse(c, 500, "Internal Server Error", err)
+		return
+	}
+
+	downloadURL := fmt.Sprintf("%s/public/exports/%s", os.Getenv("APP_URL"), filename)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "File berhasil diunduh",
+		"url":     downloadURL,
+	})
+
+    // var buf bytes.Buffer
+    // if err := file.Write(&buf); err != nil {
+    //     helpers.ErrorResponse(c, 500, "failed to generate excel file", err)
+    //     return
+    // }
+
+    // c.Header("Content-Description", "File Transfer")
+    // c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+    // c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
 }
 
 

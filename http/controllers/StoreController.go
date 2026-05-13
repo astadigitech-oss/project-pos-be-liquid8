@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"liquid8/pos/models"
 
 	"github.com/gin-gonic/gin"
+	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 )
 
@@ -515,4 +518,218 @@ func ListStoresForSync(c *gin.Context) {
     }
 
     c.JSON(http.StatusOK, response.Success("List stores", stores))
+}
+func ExportDetailStore(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+
+	var store models.StoreProfile
+	if err := config.DB.First(&store, id).Error; err != nil {
+		helpers.ErrorResponse(c, 404, "store not found", err)
+		return
+	}
+
+	// total sales (all-time, done)
+	var totalSales float64
+	if err := config.DB.Raw(`SELECT COALESCE(SUM(total_amount),0) as total_sales FROM transactions WHERE status = 'done' AND store_id = ?`, id).Scan(&totalSales).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "Failed to calculate total sales", err)
+		return
+	}
+
+	// aggregate products by tag_color
+	type colorAgg struct {
+		TagColor   string  `json:"tag_color"`
+		TotalStock int64   `json:"total_stock"`
+		TotalPrice float64 `json:"total_price"`
+	}
+	var colorAggs []colorAgg
+	if err := config.DB.Raw(`
+		SELECT COALESCE(tag_color, '') AS tag_color, COUNT(*) AS total_stock, COALESCE(SUM(price),0) AS total_price
+		FROM products
+		WHERE store_id = ? AND status = 'display'
+		GROUP BY tag_color
+	`, id).Scan(&colorAggs).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "Failed to aggregate products by color", err)
+		return
+	}
+
+	// fetch products
+	type prodRow struct {
+		ID        uint64    `json:"id"`
+		Barcode   string    `json:"barcode"`
+		Name      string    `json:"name"`
+		Price     float64   `json:"price"`
+		TagColor  string    `json:"tag_color"`
+		Quantity  int64     `json:"quantity"`
+		Status    string    `json:"status"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	var products []prodRow
+	prodSQL := `
+		SELECT id, barcode, name, price, COALESCE(tag_color,'') AS tag_color, quantity, status, created_at
+		FROM products
+		WHERE store_id = ? AND status = 'display'
+		ORDER BY created_at DESC
+	`
+	if err := config.DB.Raw(prodSQL, id).Scan(&products).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "Failed to fetch products", err)
+		return
+	}
+
+	// fetch transactions
+	type txRow struct {
+		ID           uint64    `json:"id"`
+		Invoice      string    `json:"invoice"`
+		Kasir        string    `json:"kasir"`
+		TotalItem    int       `json:"total_item"`
+		TotalQuantity int      `json:"total_quantity"`
+		Subtotal     float64   `json:"subtotal"`
+		Tax          float64   `json:"tax"`
+		TotalAmount  float64   `json:"total_amount"`
+		PaymentMethod string   `json:"payment_method"`
+		Status       string    `json:"status"`
+		CreatedAt    time.Time `json:"created_at"`
+	}
+	var txs []txRow
+	txSQL := `
+		SELECT t.id, t.invoice, COALESCE(u.name,'') AS kasir, t.total_item, t.total_quantity, COALESCE(t.subtotal,0) AS subtotal, COALESCE(t.tax_price,0) AS tax, COALESCE(t.total_amount,0) AS total_amount, t.payment_method, t.status, t.created_at
+		FROM transactions t
+		LEFT JOIN users u ON u.id = t.user_id
+		WHERE t.store_id = ?
+		ORDER BY t.created_at DESC
+	`
+	if err := config.DB.Raw(txSQL, id).Scan(&txs).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "Failed to fetch transactions", err)
+		return
+	}
+
+	// build excel
+	f := excelize.NewFile()
+	sheet1 := "Detail Toko"
+	// sheet2 := "Products"
+	sheet3 := "Penjualan"
+
+	// rename default sheet to Detail
+	f.SetSheetName("Sheet1", sheet1)
+
+	fillGrayStyle, _ := helpers.BuildStyle(f, config.ExcelStyles["fill_gray"], config.ExcelStyles["font_bold"])
+	fontHeaderStyle,_ := helpers.BuildStyle(f, config.ExcelStyles["font_bold_size14"])
+	fontBold,_ := helpers.BuildStyle(f, config.ExcelStyles["font_bold"])
+
+	// Sheet1: store info
+	f.MergeCell(sheet1, "A1", "D1")
+	f.MergeCell(sheet1, "A2", "D2")
+	f.MergeCell(sheet1, "A3", "D3")
+	f.MergeCell(sheet1, "A5", "C5")
+	f.MergeCell(sheet1, "A6", "B6")
+
+	// f.SetColWidth(sheet1, "A", "C", 20)
+
+	f.SetCellValue(sheet1, "A1", store.StoreName)
+	f.SetCellStyle(sheet1, "A1", "B1", fontHeaderStyle)
+	f.SetCellValue(sheet1, "A2", store.Address)
+	f.SetCellValue(sheet1, "A3", store.Phone)
+
+	f.SetCellValue(sheet1, "A5", "Summary Produk")
+	f.SetCellStyle(sheet1, "A5", "A5", fontBold)
+	f.SetCellValue(sheet1, "A6", "Total Produk")
+	f.SetCellValue(sheet1, "C6", len(products))
+	// f.SetCellValue(sheet1, "B5", totalSales)
+
+	// color aggregates header starting row 7
+	f.SetCellValue(sheet1, "A8", "Kategori")
+	f.SetCellValue(sheet1, "B8", "Total Stock")
+	f.SetCellValue(sheet1, "C8", "Total Price")
+	f.SetCellStyle(sheet1, "A8", "C8", fillGrayStyle)
+	r := 9
+	for _, ca := range colorAggs {
+		cellA, _ := excelize.CoordinatesToCellName(1, r)
+		cellB, _ := excelize.CoordinatesToCellName(2, r)
+		cellC, _ := excelize.CoordinatesToCellName(3, r)
+		f.SetCellValue(sheet1, cellA, ca.TagColor)
+		f.SetCellValue(sheet1, cellB, ca.TotalStock)
+		f.SetCellValue(sheet1, cellC, ca.TotalPrice)
+		r++
+	}
+	r++
+	f.MergeCell(sheet1, fmt.Sprintf("A%d", r), fmt.Sprintf("C%d", r))
+	f.SetCellValue(sheet1, fmt.Sprintf("A%d", r), "List Product")
+	f.SetCellStyle(sheet1, fmt.Sprintf("A%d", r), fmt.Sprintf("A%d", r), fontBold)
+	r++
+	
+	headers := []string{"ID", "Barcode", "Name", "Price", "TagColor", "Quantity", "Status", "CreatedAt"}
+	for i, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, r)
+		f.SetCellValue(sheet1, cell, h)
+		f.SetCellStyle(sheet1, cell, cell, fillGrayStyle)
+	}
+	r++
+
+	for _, p := range products {
+		f.SetCellValue(sheet1, fmt.Sprintf("A%d", r), p.ID)
+		f.SetCellValue(sheet1, fmt.Sprintf("B%d", r), p.Barcode)
+		f.SetCellValue(sheet1, fmt.Sprintf("C%d", r), p.Name)
+		f.SetCellValue(sheet1, fmt.Sprintf("D%d", r), p.Price)
+		f.SetCellValue(sheet1, fmt.Sprintf("E%d", r), p.TagColor)
+		f.SetCellValue(sheet1, fmt.Sprintf("F%d", r), p.Quantity)
+		f.SetCellValue(sheet1, fmt.Sprintf("G%d", r), p.Status)
+		f.SetCellValue(sheet1, fmt.Sprintf("H%d", r), helpers.ToLocalTime(p.CreatedAt, store.Timezone).Format("2006-01-02 15:04:05"))
+		r++
+	}
+
+	// Sheet3: transactions
+	f.NewSheet(sheet3)
+	th := []string{"ID", "Invoice", "Kasir", "TotalItem", "TotalQty", "Subtotal", "Tax", "TotalAmount", "PaymentMethod", "Status", "Transaction Date"}
+	for i, h := range th {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellValue(sheet3, cell, h)
+		f.SetCellStyle(sheet3, cell, cell, fillGrayStyle)
+	}
+	for i, t := range txs {
+		row := i + 2
+		f.SetCellValue(sheet3, fmt.Sprintf("A%d", row), t.ID)
+		f.SetCellValue(sheet3, fmt.Sprintf("B%d", row), t.Invoice)
+		f.SetCellValue(sheet3, fmt.Sprintf("C%d", row), t.Kasir)
+		f.SetCellValue(sheet3, fmt.Sprintf("D%d", row), t.TotalItem)
+		f.SetCellValue(sheet3, fmt.Sprintf("E%d", row), t.TotalQuantity)
+		f.SetCellValue(sheet3, fmt.Sprintf("F%d", row), t.Subtotal)
+		f.SetCellValue(sheet3, fmt.Sprintf("G%d", row), t.Tax)
+		f.SetCellValue(sheet3, fmt.Sprintf("H%d", row), t.TotalAmount)
+		f.SetCellValue(sheet3, fmt.Sprintf("I%d", row), t.PaymentMethod)
+		f.SetCellValue(sheet3, fmt.Sprintf("J%d", row), t.Status)
+		f.SetCellValue(sheet3, fmt.Sprintf("K%d", row), helpers.ToLocalTime(t.CreatedAt, store.Timezone).Format("2006-01-02 15:04:05"))
+	}
+
+	// set active sheet to Detail
+	idx, _ := f.GetSheetIndex(sheet1)
+	f.SetActiveSheet(idx)
+
+	filename := fmt.Sprintf("detail_%s.xlsx", strings.ToLower(store.StoreName))
+	filename = strings.ReplaceAll(filename, " ", "_")
+	// Save file
+	dir := "./public/exports"
+	os.MkdirAll(dir, 0755)
+
+	fullPath := filepath.Join(dir, filename)
+	if err := f.SaveAs(fullPath); err != nil {
+		helpers.ErrorResponse(c, 500, "Internal Server Erorr", err)
+		return
+	}
+
+	downloadURL := fmt.Sprintf("%s/public/exports/%s", os.Getenv("APP_URL"), filename)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "File berhasil diunduh",
+		"url":     downloadURL,
+	})
+
+	// var buf bytes.Buffer
+	// if err := f.Write(&buf); err != nil {
+	// 	helpers.ErrorResponse(c, 500, "failed to generate excel file", err)
+	// 	return
+	// }
+
+	// c.Header("Content-Description", "File Transfer")
+	// c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	// c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
 }
