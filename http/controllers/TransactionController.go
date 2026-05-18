@@ -896,6 +896,7 @@ func CheckoutTransaction(c *gin.Context) {
         }
 
         if it.Type == "product" {
+            ti.Type = "product"
             ti.ProductID = it.ProductID
             ti.PackagingID = nil
             productIDs = append(productIDs, *it.ProductID)
@@ -903,7 +904,8 @@ func CheckoutTransaction(c *gin.Context) {
         }else {
             totalPackagingQty += it.Quantity
             totalPackagingPrice += it.Price * float64(it.Quantity) 
-
+            
+            ti.Type = "packaging"
             ti.PackagingID = it.PackagingID
             ti.ProductID = nil
 
