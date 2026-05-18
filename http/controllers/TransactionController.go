@@ -115,10 +115,15 @@ func AddToCart(c *gin.Context) {
     var cartItem models.CartItem
     if p.Type == "product" {
         var product models.Product
-		if err := tx.Where("(barcode = ? OR old_barcode = ?) AND store_id = ? AND deleted_at IS NULL", p.ReferenceID, p.ReferenceID, storeID).
+		if err := tx.Where("barcode = ? AND store_id = ? AND deleted_at IS NULL", p.ReferenceID, storeID).
 			First(&product).Error; err != nil {
 			tx.Rollback()
 			helpers.ErrorResponse(c, 404, "Product tidak ditemukan", err)
+			return
+		}
+		if product.Price <= 0 {
+			tx.Rollback()
+			helpers.ErrorResponse(c, 422, "Barang dengan harga Rp0 tidak bisa dijual", nil)
 			return
 		}
 		if product.Status == "sale" {
@@ -875,6 +880,11 @@ func CheckoutTransaction(c *gin.Context) {
     var itemsPackaging []txRowPriceModel
     // migrate items
     for _, it := range items {
+        if it.Type == "product" && it.Price <= 0  {
+            tx.Rollback()
+            helpers.ErrorResponse(c, 422, "Gagal: Terdapat product dengan harga Rp0", nil)
+            return
+        }
         ti := models.TransactionItem{
             StoreID: storeID,
             TransactionID: tr.ID,
