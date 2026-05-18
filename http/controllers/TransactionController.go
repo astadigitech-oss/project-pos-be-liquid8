@@ -1791,7 +1791,7 @@ func GetAllTransactions(c *gin.Context) {
     if q != "" {
         like := "%"+q+"%"
         baseWhere += " AND (t.invoice LIKE ? OR m.name LIKE ? OR s.store_name LIKE ?)"
-        args = append(args, like, like, like, like)
+        args = append(args, like, like, like)
     }
 
     var total int64
