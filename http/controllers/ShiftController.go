@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -212,6 +213,26 @@ func EndShift(c *gin.Context) {
 	}
 	shift.ToLocal(user.Store.Timezone)
 
+	type txItemRow struct {
+        ID uint64 `json:"id"`
+        Status string `json:"status"`
+        TransactionID uint64 `json:"transaction_id"`
+        Invoice string `json:"invoice"`
+        ProductName string `json:"product_name"`
+        Quantity uint64 `json:"quantity"`
+        Price float64 `json:"price"`
+        DiscountPrice float64 `json:"discount_price"`
+        Subtotal float64 `json:"subtotal"`
+        Type string `json:"type"`
+        CreatedAt time.Time `json:"created_at"`
+    }
+    type groupingItemPrice struct {
+        Name string `json:"name"`
+        Price    float64 `json:"price"`
+        Quantity uint64   `json:"quantity"`
+        Total float64   `json:"total"`
+    }
+
 	var result struct { 
         Start           time.Time  `json:"start"`
         End             *time.Time `json:"end"` // pointer kalau bisa null
@@ -230,6 +251,8 @@ func EndShift(c *gin.Context) {
         
         TotalTax        float64    `json:"total_tax"`
         TotalSubtotal   float64    `json:"total_subtotal"`
+		TotalProduct    int64      `json:"total_product_sales"`
+		TotalPackaging  int64      `json:"total_packaging_sales"`
         TotalAmount  float64    `json:"total_penjualan"`
         TotalRounded  float64    `json:"pembulatan"`
         ExpectedCash    float64    `json:"expected_cash"`
@@ -244,6 +267,8 @@ func EndShift(c *gin.Context) {
             Phone string `json:"phone"`
             Address string `json:"address"`
         } `json:"store"`
+		Items []groupingItemPrice `json:"items"`
+        Products []txItemRow `json:"products"`
     }
 
 	result.Start = shift.StartTime
@@ -275,6 +300,76 @@ func EndShift(c *gin.Context) {
     result.Store.Name = shift.Store.StoreName
     result.Store.Phone = shift.Store.Phone
     result.Store.Address = shift.Store.Address
+
+	var products []txItemRow
+
+    baseWhere := "WHERE t.shift_id = ?"
+    args := []interface{}{shift.ID}
+
+    dataSQL := fmt.Sprintf(`
+        SELECT 
+            ti.id,
+            t.status,
+            ti.transaction_id,
+            t.invoice,
+            ti.product_name,
+            ti.quantity,
+            ti.price,
+            ti.discount_price,
+            ti.subtotal,
+            ti.type,
+            ti.created_at
+        FROM transaction_items ti
+        JOIN transactions t ON t.id = ti.transaction_id
+        %s
+        ORDER BY ti.created_at DESC
+    `, baseWhere)
+    // args = append(args, limit, offset)
+    if err := config.DB.Raw(dataSQL, args...).Scan(&products).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to fetch tx", err);
+        return
+    }
+	result.Products = products
+    //ubah ke local time
+    for i := range products {
+        products[i].CreatedAt = helpers.ToLocalTime(products[i].CreatedAt, "Asia/Jakarta")
+    }
+
+    //grouping per kategori
+    priceMap := make(map[float64]uint64)
+    var itemsPackaging []groupingItemPrice
+    for _, item := range products {
+		if item.Status == "done" {
+			switch item.Type {
+			case "product":
+				result.TotalProduct += 1
+				priceMap[item.Price] += item.Quantity
+			case "packaging":
+				result.TotalPackaging += 1
+				itemsPackaging = append(itemsPackaging, groupingItemPrice{
+					Name: item.ProductName,
+					Price: item.Price,
+					Quantity: item.Quantity,
+					Total: item.Price * float64(item.Quantity),
+				})
+			}
+		}
+    }
+    // ambil item packaging
+    for price, qty := range priceMap {
+        result.Items = append(result.Items, groupingItemPrice{
+            Name: formatPriceToProductName(price),
+            Price:    price,
+            Quantity: qty,
+            Total: price * float64(qty),
+        })
+    }
+    // sorting dari harga terendah
+    sort.Slice(result.Items, func(i, j int) bool {
+        return result.Items[i].Price < result.Items[j].Price
+    })
+    //tambahkkan packaging list
+    result.Items = append(result.Items, itemsPackaging...)
 
 	c.JSON(http.StatusOK, response.Success("Shift closed", result))
 }

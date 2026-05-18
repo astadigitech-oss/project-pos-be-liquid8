@@ -1358,11 +1358,18 @@ func DetailTransactionsShift(c *gin.Context) {
         TransactionID uint64 `json:"transaction_id"`
         Invoice string `json:"invoice"`
         ProductName string `json:"product_name"`
-        Quantity int `json:"quantity"`
+        Quantity uint64 `json:"quantity"`
         Price float64 `json:"price"`
         DiscountPrice float64 `json:"discount_price"`
         Subtotal float64 `json:"subtotal"`
+        Type string `json:"type"`
         CreatedAt time.Time `json:"created_at"`
+    }
+    type groupingItemPrice struct {
+        Name string `json:"name"`
+        Price    float64 `json:"price"`
+        Quantity uint64   `json:"quantity"`
+        Total float64   `json:"total"`
     }
 
     var result struct { 
@@ -1385,6 +1392,8 @@ func DetailTransactionsShift(c *gin.Context) {
         
         TotalTax        float64    `json:"total_tax"`
         TotalSubtotal   float64    `json:"total_subtotal"`
+        TotalProduct   int64    `json:"total_product_sales"`
+        TotalPackaging   int64    `json:"total_packaging_sales"`
         TotalAmount  float64    `json:"total_penjualan"`
         TotalRounded  float64    `json:"pembulatan"`
         ExpectedCash    float64    `json:"expected_cash"`
@@ -1400,10 +1409,11 @@ func DetailTransactionsShift(c *gin.Context) {
             Address string `json:"address"`
         } `json:"store"`
 
-        Items []txItemRow `json:"items"`
+        Items []groupingItemPrice `json:"items"`
+        Products []txItemRow `json:"products"`
     }
 
-    var rows []txItemRow
+    var products []txItemRow
 
     baseWhere := "WHERE t.shift_id = ?"
     args := []interface{}{shiftID}
@@ -1436,6 +1446,7 @@ func DetailTransactionsShift(c *gin.Context) {
             ti.price,
             ti.discount_price,
             ti.subtotal,
+            ti.type,
             ti.created_at
         FROM transaction_items ti
         JOIN transactions t ON t.id = ti.transaction_id
@@ -1443,14 +1454,50 @@ func DetailTransactionsShift(c *gin.Context) {
         ORDER BY ti.created_at DESC
     `, baseWhere)
     // args = append(args, limit, offset)
-    if err := config.DB.Raw(dataSQL, args...).Scan(&rows).Error; err != nil { 
-        helpers.ErrorResponse(c, 500, "Failed to fetch tx", err); 
-        return 
+    if err := config.DB.Raw(dataSQL, args...).Scan(&products).Error; err != nil {
+        helpers.ErrorResponse(c, 500, "Failed to fetch tx", err);
+        return
+    }
+    //ubah ke local time
+    for i := range products {
+        products[i].CreatedAt = helpers.ToLocalTime(products[i].CreatedAt, timezone)
     }
 
-    for i := range rows {
-        rows[i].CreatedAt = helpers.ToLocalTime(rows[i].CreatedAt, timezone)
+    //grouping per kategori
+    priceMap := make(map[float64]uint64)
+    var itemsPackaging []groupingItemPrice
+    for _, item := range products {
+        if item.Status == "done" {        
+            switch item.Type {
+            case "product":
+                result.TotalProduct += 1
+                priceMap[item.Price] += item.Quantity
+            case "packaging":
+                result.TotalPackaging += 1
+                itemsPackaging = append(itemsPackaging, groupingItemPrice{
+                    Name: item.ProductName,
+                    Price: item.Price,
+                    Quantity: item.Quantity,
+                    Total: item.Price * float64(item.Quantity),
+                })
+            }
+        }
     }
+    // ambil item packaging
+    for price, qty := range priceMap {
+        result.Items = append(result.Items, groupingItemPrice{
+            Name: formatPriceToProductName(price),
+            Price:    price,
+            Quantity: qty,
+            Total: price * float64(qty),
+        })
+    }
+    // sorting dari harga terendah
+    sort.Slice(result.Items, func(i, j int) bool {
+        return result.Items[i].Price < result.Items[j].Price
+    })
+    //tambahkkan packaging list
+    result.Items = append(result.Items, itemsPackaging...)
 
     // lastPage := int(math.Ceil(float64(total)/float64(limit)))
     // pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(total))
@@ -1491,7 +1538,7 @@ func DetailTransactionsShift(c *gin.Context) {
     result.Store.Name = shift.Store.StoreName
     result.Store.Phone = shift.Store.Phone
     result.Store.Address = shift.Store.Address
-    result.Items = rows
+    result.Products = products
 
     c.JSON(http.StatusOK, response.Success("Detail Transaction Shift", result))
 }
