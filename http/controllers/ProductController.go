@@ -211,7 +211,7 @@ func ReceiveMigrateDocument(c *gin.Context) {
             ActualPrice			float64		`json:"actual_price"`
             Barcode       		string     	`json:"barcode" binding:"required"`
             Name          		string     	`json:"name" binding:"required"`
-            Price         		float64    	`json:"price"`
+            Price         		float64    	`json:"price" binding:"required"`
             Quantity      		int64      	`json:"quantity" binding:"required"`
             Status        		string     	`json:"status" binding:"required"`
             TagColor    		string     	`json:"tag_color" binding:"required"`
