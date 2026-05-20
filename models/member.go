@@ -12,7 +12,8 @@ type Member struct {
 	Code            string     `json:"code" gorm:"size:15;not null"`
 	Name        	string     `json:"name" gorm:"size:255;not null"`
 	Phone        	string     `json:"phone" gorm:"size:15;not null"`
-	
+	TotalPoint    	uint64      `json:"total_point" gorm:"default:0"`
+
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	DeletedAt 			gorm.DeletedAt `gorm:"index" json:"-"`

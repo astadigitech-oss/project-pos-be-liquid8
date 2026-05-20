@@ -81,10 +81,9 @@ func RouteHandler(r *gin.Engine) {
 		//========================================
 		// MEMBER
 		//========================================
-		protected.GET("members", controllers.ListAllMembers) //MemberController.go
+		protected.GET("members", controllers.ListMembers) //MemberController.go
 		protected.GET("members/:id", controllers.DetailMember) //MemberController.go
 		protected.POST("members", controllers.CreateMember) //MemberController.go
-		protected.POST("admin/members", middleware.RoleCheck([]string{"superadmin","admin"}), controllers.AdminCreateMember) //MemberController.go
 		protected.PUT("members/:id", controllers.UpdateMember) //MemberController.go
 		protected.DELETE("members/:id", controllers.DeleteMember) //MemberController.go
 		
@@ -104,6 +103,13 @@ func RouteHandler(r *gin.Engine) {
 
 	/*======================= ADMIN ONLY =======================*/
 		roleGroup(protected, []string{"superadmin","admin"}, func(rg *gin.RouterGroup) {
+			//========================================
+			// MEMBER
+			//========================================
+			rg.GET("members/all", controllers.ListAllMembers) //MemberController.go
+			rg.GET("members/summary", controllers.SummaryMember) //MemberController.go
+			rg.POST("admin/members", controllers.AdminCreateMember) //MemberController.go
+
 			//========================================
 			// PPN
 			//========================================

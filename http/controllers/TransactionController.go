@@ -380,7 +380,7 @@ func PendingCart(c *gin.Context) {
 
     //load data member
     var member models.Member
-    if err := config.DB.Where("id = ?", payload.MemberID).First(&member).Error; err != nil {
+    if err := config.DB.Where("id = ? AND store_id = ?", payload.MemberID, storeID).First(&member).Error; err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
             helpers.ErrorResponse(c, 404, "Member not found", nil)
         } else {
@@ -784,7 +784,7 @@ func CheckoutTransaction(c *gin.Context) {
 
     //load data member
     var member models.Member
-    if err := config.DB.Where("id = ?", p.MemberID).First(&member).Error; err != nil {
+    if err := config.DB.Where("id = ? AND store_id = ?", p.MemberID, storeID).First(&member).Error; err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
             helpers.ErrorResponse(c, 404, "Member not found", nil)
         } else {
@@ -955,9 +955,11 @@ func CheckoutTransaction(c *gin.Context) {
 		helpers.ErrorResponse(c, 422, fmt.Sprintf("Paid amount (%.2f) tidak boleh kurang dari total amount (%.2f)", p.PaidAmount, totalAmount), nil)
 		return
 	}
+    memberPoint := math.Floor(totalAmount / 1000)
     // update transaction totals
     if err := tx.Model(&tr).Updates(map[string]interface{}{
         "tax_price": ppnAmount,
+        "member_point": memberPoint,
         "total_packaging_qty": totalPackagingQty,
         "total_packaging_price": totalPackagingPrice,
         "rounded_price": roundedPrice,
@@ -968,6 +970,12 @@ func CheckoutTransaction(c *gin.Context) {
     }).Error; err != nil {
         tx.Rollback()
         helpers.ErrorResponse(c, 500, "Failed to update transaction totals", err)
+        return
+    }
+    //update member point
+    if err := tx.Model(&member).Update("total_point", gorm.Expr("total_point + ?", memberPoint)).Error; err != nil {
+        tx.Rollback()
+        helpers.ErrorResponse(c, 500, "Failed to update member point", err)
         return
     }
     // delete cart items
