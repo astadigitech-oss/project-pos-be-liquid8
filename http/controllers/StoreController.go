@@ -704,7 +704,7 @@ func ExportDetailStore(c *gin.Context) {
 	idx, _ := f.GetSheetIndex(sheet1)
 	f.SetActiveSheet(idx)
 
-	filename := fmt.Sprintf("detail_%s.xlsx", strings.ToLower(store.StoreName))
+	filename := fmt.Sprintf("%s_%d.xlsx", strings.ToLower(store.StoreName), time.Now().Unix())
 	filename = strings.ReplaceAll(filename, " ", "_")
 	// Save file
 	dir := "./public/exports"
@@ -732,7 +732,7 @@ func ExportDetailStore(c *gin.Context) {
 	// 	return
 	// }
 
-	downloadURL := fmt.Sprintf("%s/public/exports/%s?v=%d", os.Getenv("APP_URL"), filename, time.Now().Unix())
+	downloadURL := fmt.Sprintf("%s/public/exports/%s", os.Getenv("APP_URL"), filename)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
