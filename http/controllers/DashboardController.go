@@ -129,46 +129,74 @@ func GetTotalSalesByFilter(c *gin.Context) {
 	var start time.Time
 	var end time.Time
 
-	switch period {
-	case "week":
-		// Week: Monday..Sunday of current week
-		// time.Sunday = 0
-		// time.Monday = 1
-		// time.Tuesday = 2
-		// time.Wednesday = 3
-		// time.Thursday = 4
-		// time.Friday = 5
-		// time.Saturday = 6
-		weekday := int(now.Weekday())
-		if weekday == 0 {
-			weekday = 7
-		}
-		monday := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
-		start = monday
-		end = monday.AddDate(0, 0, 7).Add(-time.Second)
-
-	case "month":
-		start = time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, now.Location())
-		end = time.Date(now.Year(), time.December, 31, 23, 59, 59, 0, now.Location())
-
-	default:
-		start = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		end = start.AddDate(0, 0, 1).Add(-time.Second)
-	}
-
 	type Row struct {
 		Date  time.Time
 		Total float64
 	}
 
 	var rows []Row
-	if err := config.DB.Model(&models.Transaction{}).
+	baseQuery := config.DB.Model(&models.Transaction{}).
 		Select("DATE(created_at + INTERVAL 7 HOUR) as date, COALESCE(SUM(total_amount),0) as total").
-		Where("status = ? AND created_at >= ? AND created_at <= ?", "done", start.UTC(), end.UTC()).
-		Group("date").
-		Scan(&rows).Error; err != nil {
+		Where("status = ?", "done")
 
-		helpers.ErrorResponse(c, 500, "Failed to calculate sales", err)
+	switch period {
+		case "week":
+			// Week: Monday..Sunday of current week
+			// time.Sunday = 0
+			// time.Monday = 1
+			// time.Tuesday = 2
+			// time.Wednesday = 3
+			// time.Thursday = 4
+			// time.Friday = 5
+			// time.Saturday = 6
+			weekday := int(now.Weekday())
+			if weekday == 0 {
+				weekday = 7
+			}
+			monday := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
+			start = monday
+			end = monday.AddDate(0, 0, 7).Add(-time.Second)
+
+			baseQuery.Where("created_at >= ? AND created_at <= ?", start.UTC(), end.UTC())
+
+		case "month":
+			start = time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, now.Location())
+			end = time.Date(now.Year(), time.December, 31, 23, 59, 59, 0, now.Location())
+
+			baseQuery.Where("created_at >= ? AND created_at <= ?", start.UTC(), end.UTC())
+
+		case "custom":
+			startDateQuery := c.Query("start_date")
+			endDateQuery := c.Query("end_date")
+
+			if startDateQuery == "" || endDateQuery == "" {
+				helpers.ErrorResponse(c, 400, "Date range harus valid untuk period custom", nil)
+				return
+			}
+
+			startDate, err := helpers.ParseFlexibleDate(startDateQuery, "Asia/Jakarta")
+			if err != nil {
+				helpers.ErrorResponse(c, 400, "Invalid start_date", err)
+				return
+			}
+			endDate, err := helpers.ParseFlexibleDate(endDateQuery, "Asia/Jakarta")
+			if err != nil {
+				helpers.ErrorResponse(c, 400, "Invalid end_date", err)
+				return
+			}
+
+			start = helpers.GetStartOfDay(startDate)
+			end = helpers.GetEndOfDay(endDate)
+
+			baseQuery.Where("created_at >= ? AND created_at <= ?", start.UTC(), end.UTC())
+
+		default:
+			helpers.ErrorResponse(c, 400, "Invalid period", nil)
+			return
+	}
+
+	if err := baseQuery.Group("date").Scan(&rows).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "Failed to fetch sales data", err)
 		return
 	}
 
@@ -190,8 +218,8 @@ func GetTotalSalesByFilter(c *gin.Context) {
 	payload := resFormat{
 		Period: period,
 	}
-	// WEEK / DAY (per hari)
-	if period == "week" || period == "day" {
+	// WEEK / CUSTOM (per hari)
+	if period == "week" || period == "custom" {
 		payload.Start = start.Format("02 January 2006")
 		payload.End = end.Format("02 January 2006")
 
@@ -233,5 +261,5 @@ func GetTotalSalesByFilter(c *gin.Context) {
 	}
 	payload.Sales = results
 
-	c.JSON(http.StatusOK, response.Success("total sales", payload))
+	c.JSON(http.StatusOK, response.Success("Total Sales", payload))
 }
