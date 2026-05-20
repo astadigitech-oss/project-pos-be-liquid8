@@ -1923,10 +1923,6 @@ func GetAllTransactions(c *gin.Context) {
         },
     })
 }
-// removed duplicate stub
-
-// ExportTransactions: export transactions to XLSX using excelize.
-// If store_id provided, export only that store to single sheet; otherwise export all stores, one sheet per store.
 func ExportTransactions(c *gin.Context) {
     storeIDStr := strings.TrimSpace(c.DefaultQuery("store_id", ""))
 

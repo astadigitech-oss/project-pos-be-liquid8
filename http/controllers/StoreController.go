@@ -712,25 +712,38 @@ func ExportDetailStore(c *gin.Context) {
 		helpers.ErrorResponse(c, 500, "Failed create directory", err)
 		return
 	}
-	fullPath := filepath.Join(dir, filename)
 
-	// cek jika file sudah ada maka hapus
-	if _, err := os.Stat(fullPath); err == nil {
-		if err := os.Remove(fullPath); err != nil {
-			helpers.ErrorResponse(c, 500, "Failed remove existing file", err)
-			return
+	prefix := fmt.Sprintf("%s_", strings.ToLower(store.StoreName))
+	prefix = strings.ReplaceAll(prefix, " ", "_")
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Failed read directory", err)
+		return
+	}
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		filename := file.Name()
+		// cek awalan nama file
+		if strings.HasPrefix(filename, prefix) {
+			fullPath := filepath.Join(dir, filename)
+
+			if err := os.Remove(fullPath); err != nil {
+				fmt.Println("failed remove file:", fullPath, err)
+				continue
+			}
+
+			fmt.Println("deleted:", fullPath)
 		}
 	}
+
+	fullPath := filepath.Join(dir, filename)
 
 	if err := f.SaveAs(fullPath); err != nil {
 		helpers.ErrorResponse(c, 500, "Gagal menyimpan file", err)
 		return
 	}
-
-	// if err := os.Rename(tmpPath, fullPath); err != nil {
-	// 	helpers.ErrorResponse(c, 500, "Gagal mengubah nama file", err)
-	// 	return
-	// }
 
 	downloadURL := fmt.Sprintf("%s/public/exports/%s", os.Getenv("APP_URL"), filename)
 
