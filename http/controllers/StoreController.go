@@ -712,13 +712,8 @@ func ExportDetailStore(c *gin.Context) {
 		helpers.ErrorResponse(c, 500, "Failed create directory", err)
 		return
 	}
-
 	fullPath := filepath.Join(dir, filename)
-	tmpPath := fullPath + ".new"
-	if err := f.SaveAs(tmpPath); err != nil {
-		helpers.ErrorResponse(c, 500, "Gagal menyimpan file", err)
-		return
-	}
+
 	// cek jika file sudah ada maka hapus
 	if _, err := os.Stat(fullPath); err == nil {
 		if err := os.Remove(fullPath); err != nil {
@@ -727,10 +722,15 @@ func ExportDetailStore(c *gin.Context) {
 		}
 	}
 
-	if err := os.Rename(tmpPath, fullPath); err != nil {
-		helpers.ErrorResponse(c, 500, "Gagal mengubah nama file", err)
+	if err := f.SaveAs(fullPath); err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal menyimpan file", err)
 		return
 	}
+
+	// if err := os.Rename(tmpPath, fullPath); err != nil {
+	// 	helpers.ErrorResponse(c, 500, "Gagal mengubah nama file", err)
+	// 	return
+	// }
 
 	downloadURL := fmt.Sprintf("%s/public/exports/%s?v=%d", os.Getenv("APP_URL"), filename, time.Now().Unix())
 
