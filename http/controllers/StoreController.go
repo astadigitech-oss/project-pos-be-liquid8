@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -555,6 +556,7 @@ func ExportDetailStore(c *gin.Context) {
 	// fetch products
 	type prodRow struct {
 		ID        uint64    `json:"id"`
+		OldBarcode   string    `json:"old_barcode"`
 		Barcode   string    `json:"barcode"`
 		Name      string    `json:"name"`
 		Price     float64   `json:"price"`
@@ -565,7 +567,7 @@ func ExportDetailStore(c *gin.Context) {
 	}
 	var products []prodRow
 	prodSQL := `
-		SELECT id, barcode, name, price, COALESCE(tag_color,'') AS tag_color, quantity, status, created_at
+		SELECT id, COALESCE(old_barcode, "") as old_barcode, barcode, name, price, COALESCE(tag_color,'') AS tag_color, quantity, status, created_at
 		FROM products
 		WHERE store_id = ? AND status = 'display'
 		ORDER BY created_at DESC
@@ -576,37 +578,93 @@ func ExportDetailStore(c *gin.Context) {
 	}
 
 	// fetch transactions
-	type txRow struct {
-		ID           uint64    `json:"id"`
-		Invoice      string    `json:"invoice"`
-		Kasir        string    `json:"kasir"`
-		TotalItem    int       `json:"total_item"`
-		TotalQuantity int      `json:"total_quantity"`
-		Subtotal     float64   `json:"subtotal"`
-		Tax          float64   `json:"tax"`
-		TotalAmount  float64   `json:"total_amount"`
-		PaymentMethod string   `json:"payment_method"`
-		Status       string    `json:"status"`
-		CreatedAt    time.Time `json:"created_at"`
-	}
-	var txs []txRow
+	type txItemRow struct {
+        ID uint64 
+        Invoice string
+        Status string 
+        Kasir string 
+        OldBarcode string
+        Barcode string
+        ProductName string
+        TagColor string
+        Quantity uint64
+        Price float64
+        PaymentMethod string
+        Type string
+        CreatedAt time.Time
+    }
+	var txs []txItemRow
 	txSQL := `
-		SELECT t.id, t.invoice, COALESCE(u.name,'') AS kasir, t.total_item, t.total_quantity, COALESCE(t.subtotal,0) AS subtotal, COALESCE(t.tax_price,0) AS tax, COALESCE(t.total_amount,0) AS total_amount, t.payment_method, t.status, t.created_at
-		FROM transactions t
-		LEFT JOIN users u ON u.id = t.user_id
-		WHERE t.store_id = ?
-		ORDER BY t.created_at DESC
-	`
+        SELECT 
+            ti.id,
+            t.invoice,
+            t.status,
+            COALESCE(u.name, "-") as kasir,
+            COALESCE(p.old_barcode, "") as old_barcode,
+            COALESCE(p.barcode, "") as barcode,
+            ti.product_name,
+			p.tag_color,
+            ti.quantity,
+            ti.price,
+            ti.subtotal,
+			t.payment_method,
+            ti.type,
+            t.created_at
+        FROM transaction_items ti
+        JOIN transactions t ON t.id = ti.transaction_id
+        LEFT JOIN users u ON u.id = t.user_id
+        LEFT JOIN products p ON p.id = ti.product_id
+        WHERE t.store_id = ?
+        ORDER BY ti.created_at DESC
+    `
 	if err := config.DB.Raw(txSQL, id).Scan(&txs).Error; err != nil {
 		helpers.ErrorResponse(c, 500, "Failed to fetch transactions", err)
 		return
 	}
+	//ubah ke local time
+    for i := range txs {
+        txs[i].CreatedAt = helpers.ToLocalTime(txs[i].CreatedAt, "Asia/Jakarta")
+    }
+
+	//grouping per kategori
+	type groupingItemPrice struct {
+        Name string `json:"name"`
+        Price    float64 `json:"price"`
+        Quantity uint64   `json:"quantity"`
+        Total float64   `json:"total"`
+    }
+    priceMap := make(map[float64]uint64)
+	var totalProductSale uint64
+    var productSale []groupingItemPrice
+    for _, item := range txs {
+        if item.Status == "done" {
+            switch item.Type {
+            case "product":
+                totalProductSale += 1
+                priceMap[item.Price] += item.Quantity
+            }
+        }
+    }
+    // ambil item packaging
+    for price, qty := range priceMap {
+        productSale = append(productSale, groupingItemPrice{
+            Name: formatPriceToProductName(price),
+            Price:    price,
+            Quantity: qty,
+            Total: price * float64(qty),
+        })
+    }
+    // sorting dari harga terendah
+    sort.Slice(productSale, func(i, j int) bool {
+        return productSale[i].Price < productSale[j].Price
+    })
+
 
 	// build excel
 	f := excelize.NewFile()
 	defer f.Close()
-	sheet1 := "Detail Toko"
-	// sheet2 := "Products"
+	sheet1 := "Summary"
+	sheet2 := "Produk"
 	sheet3 := "Penjualan"
 
 	// rename default sheet to Detail
@@ -622,6 +680,7 @@ func ExportDetailStore(c *gin.Context) {
 	f.MergeCell(sheet1, "A3", "D3")
 	f.MergeCell(sheet1, "A5", "C5")
 	f.MergeCell(sheet1, "A6", "B6")
+	f.SetColWidth(sheet1, "A", "D", 16)
 
 	// f.SetColWidth(sheet1, "A", "C", 20)
 
@@ -653,33 +712,62 @@ func ExportDetailStore(c *gin.Context) {
 	}
 	r++
 	f.MergeCell(sheet1, fmt.Sprintf("A%d", r), fmt.Sprintf("C%d", r))
-	f.SetCellValue(sheet1, fmt.Sprintf("A%d", r), "List Product")
-	f.SetCellStyle(sheet1, fmt.Sprintf("A%d", r), fmt.Sprintf("A%d", r), fontBold)
+	f.SetCellStyle(sheet1, fmt.Sprintf("A%d", r), fmt.Sprintf("C%d", r), fontBold)
+	f.SetCellValue(sheet1, fmt.Sprintf("A%d", r), "Summary Transaction")
 	r++
-	
-	headers := []string{"ID", "Barcode", "Name", "Price", "TagColor", "Quantity", "Status", "CreatedAt"}
-	for i, h := range headers {
-		cell, _ := excelize.CoordinatesToCellName(i+1, r)
-		f.SetCellValue(sheet1, cell, h)
-		f.SetCellStyle(sheet1, cell, cell, fillGrayStyle)
-	}
+	f.MergeCell(sheet1, fmt.Sprintf("A%d", r), fmt.Sprintf("B%d", r))
+	f.SetCellValue(sheet1, fmt.Sprintf("A%d", r), "Total Produk Terjual")
+	f.SetCellValue(sheet1, fmt.Sprintf("C%d", r), totalProductSale)
+	r += 2
+	// summary produk terjual per kategori
+	f.SetCellValue(sheet1, fmt.Sprintf("A%d", r), "Kategori")
+	f.SetCellValue(sheet1, fmt.Sprintf("B%d", r), "Harga")
+	f.SetCellValue(sheet1, fmt.Sprintf("C%d", r), "Quantity")
+	f.SetCellValue(sheet1, fmt.Sprintf("D%d", r), "Total Price")
+	f.SetCellStyle(sheet1, fmt.Sprintf("A%d", r), fmt.Sprintf("D%d", r), fillGrayStyle)
 	r++
-
-	for _, p := range products {
-		f.SetCellValue(sheet1, fmt.Sprintf("A%d", r), p.ID)
-		f.SetCellValue(sheet1, fmt.Sprintf("B%d", r), p.Barcode)
-		f.SetCellValue(sheet1, fmt.Sprintf("C%d", r), p.Name)
-		f.SetCellValue(sheet1, fmt.Sprintf("D%d", r), p.Price)
-		f.SetCellValue(sheet1, fmt.Sprintf("E%d", r), p.TagColor)
-		f.SetCellValue(sheet1, fmt.Sprintf("F%d", r), p.Quantity)
-		f.SetCellValue(sheet1, fmt.Sprintf("G%d", r), p.Status)
-		f.SetCellValue(sheet1, fmt.Sprintf("H%d", r), helpers.ToLocalTime(p.CreatedAt, store.Timezone).Format("2006-01-02 15:04:05"))
+	for _, ps := range productSale {
+		cellA, _ := excelize.CoordinatesToCellName(1, r)
+		cellB, _ := excelize.CoordinatesToCellName(2, r)
+		cellC, _ := excelize.CoordinatesToCellName(3, r)
+		cellD, _ := excelize.CoordinatesToCellName(4, r)
+		f.SetCellValue(sheet1, cellA, ps.Name)
+		f.SetCellValue(sheet1, cellB, ps.Price)
+		f.SetCellValue(sheet1, cellC, ps.Quantity)
+		f.SetCellValue(sheet1, cellD, ps.Total)
 		r++
+	}
+
+	//sheet2: Produk
+	f.NewSheet(sheet2)
+	f.SetCellStyle(sheet2, fmt.Sprintf("A%d", r), fmt.Sprintf("A%d", r), fontBold)
+	f.SetColWidth(sheet2, "A", "I", 20)
+	f.SetColWidth(sheet2, "A", "A", 5)
+	f.SetColWidth(sheet2, "D", "D", 30)
+	headers := []string{"ID", "Old Barcode", "Barcode", "Name", "Price", "TagColor", "Quantity", "Status", "CreatedAt"}
+	for i, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellValue(sheet2, cell, h)
+		f.SetCellStyle(sheet2, cell, cell, fillGrayStyle)
+	}
+	for i, p := range products {
+		row := i + 2
+		f.SetCellValue(sheet2, fmt.Sprintf("A%d", row), p.ID)
+		f.SetCellValue(sheet2, fmt.Sprintf("B%d", row), p.OldBarcode)
+		f.SetCellValue(sheet2, fmt.Sprintf("C%d", row), p.Barcode)
+		f.SetCellValue(sheet2, fmt.Sprintf("D%d", row), p.Name)
+		f.SetCellValue(sheet2, fmt.Sprintf("E%d", row), p.Price)
+		f.SetCellValue(sheet2, fmt.Sprintf("F%d", row), p.TagColor)
+		f.SetCellValue(sheet2, fmt.Sprintf("G%d", row), p.Quantity)
+		f.SetCellValue(sheet2, fmt.Sprintf("H%d", row), p.Status)
+		f.SetCellValue(sheet2, fmt.Sprintf("I%d", row), helpers.ToLocalTime(p.CreatedAt, store.Timezone).Format("2006-01-02 15:04:05"))
 	}
 
 	// Sheet3: transactions
 	f.NewSheet(sheet3)
-	th := []string{"ID", "Invoice", "Kasir", "TotalItem", "TotalQty", "Subtotal", "Tax", "TotalAmount", "PaymentMethod", "Status", "Transaction Date"}
+	f.SetColWidth(sheet3, "A", "L", 20)
+	f.SetColWidth(sheet3, "A", "A", 5)
+	th := []string{"No", "Invoice", "Kasir", "Old Barcode", "Barcode", "Product Name", "Category", "Price", "Type", "Payment Method", "Status", "Transaction Date"}
 	for i, h := range th {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet3, cell, h)
@@ -687,17 +775,18 @@ func ExportDetailStore(c *gin.Context) {
 	}
 	for i, t := range txs {
 		row := i + 2
-		f.SetCellValue(sheet3, fmt.Sprintf("A%d", row), t.ID)
+		f.SetCellValue(sheet3, fmt.Sprintf("A%d", row), i+1)
 		f.SetCellValue(sheet3, fmt.Sprintf("B%d", row), t.Invoice)
 		f.SetCellValue(sheet3, fmt.Sprintf("C%d", row), t.Kasir)
-		f.SetCellValue(sheet3, fmt.Sprintf("D%d", row), t.TotalItem)
-		f.SetCellValue(sheet3, fmt.Sprintf("E%d", row), t.TotalQuantity)
-		f.SetCellValue(sheet3, fmt.Sprintf("F%d", row), t.Subtotal)
-		f.SetCellValue(sheet3, fmt.Sprintf("G%d", row), t.Tax)
-		f.SetCellValue(sheet3, fmt.Sprintf("H%d", row), t.TotalAmount)
-		f.SetCellValue(sheet3, fmt.Sprintf("I%d", row), t.PaymentMethod)
-		f.SetCellValue(sheet3, fmt.Sprintf("J%d", row), t.Status)
-		f.SetCellValue(sheet3, fmt.Sprintf("K%d", row), helpers.ToLocalTime(t.CreatedAt, store.Timezone).Format("2006-01-02 15:04:05"))
+		f.SetCellValue(sheet3, fmt.Sprintf("D%d", row), t.OldBarcode)
+		f.SetCellValue(sheet3, fmt.Sprintf("E%d", row), t.Barcode)
+		f.SetCellValue(sheet3, fmt.Sprintf("F%d", row), t.ProductName)
+		f.SetCellValue(sheet3, fmt.Sprintf("G%d", row), t.TagColor)
+		f.SetCellValue(sheet3, fmt.Sprintf("H%d", row), t.Price)
+		f.SetCellValue(sheet3, fmt.Sprintf("I%d", row), t.Type)
+		f.SetCellValue(sheet3, fmt.Sprintf("J%d", row), t.PaymentMethod)
+		f.SetCellValue(sheet3, fmt.Sprintf("K%d", row), t.Status)
+		f.SetCellValue(sheet3, fmt.Sprintf("L%d", row), helpers.ToLocalTime(t.CreatedAt, "Asia/Jakarta").Format("2006-01-02 15:04:05"))
 	}
 
 	// set active sheet to Detail
