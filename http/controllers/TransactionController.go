@@ -1170,6 +1170,7 @@ func DetailTransaction(c *gin.Context) {
 
     type transactionPerItem struct {
         ID       uint64  `json:"id"`
+        OldBarcode  *string  `json:"old_barcode"`
         Barcode  string  `json:"barcode"`
         ProductName     string  `json:"product_name"`
         Price    float64 `json:"price"`
@@ -1268,6 +1269,7 @@ func DetailTransaction(c *gin.Context) {
         if item.ProductID != nil && item.Product != nil {            
             result.Products = append(result.Products, transactionPerItem{
                 ID: item.ID,
+                OldBarcode: item.Product.OldBarcode,
                 Barcode: item.Product.Barcode,
                 ProductName: item.ProductName,
                 Price: item.Price,
@@ -1377,6 +1379,8 @@ func DetailTransactionsShift(c *gin.Context) {
         Status string `json:"status"`
         TransactionID uint64 `json:"transaction_id"`
         Invoice string `json:"invoice"`
+        OldBarcode *string `json:"old_barcode"`
+        Barcode string `json:"barcode"`
         ProductName string `json:"product_name"`
         Quantity uint64 `json:"quantity"`
         Price float64 `json:"price"`
@@ -1461,6 +1465,8 @@ func DetailTransactionsShift(c *gin.Context) {
             t.status,
             ti.transaction_id,
             t.invoice,
+            COALESCE(p.old_barcode, null) as old_barcode,
+            COALESCE(p.barcode, null) as barcode,
             ti.product_name,
             ti.quantity,
             ti.price,
@@ -1470,6 +1476,7 @@ func DetailTransactionsShift(c *gin.Context) {
             ti.created_at
         FROM transaction_items ti
         JOIN transactions t ON t.id = ti.transaction_id
+        LEFT JOIN products p ON p.id = ti.product_id
         %s
         ORDER BY ti.created_at DESC
     `, baseWhere)
