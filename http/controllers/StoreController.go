@@ -707,9 +707,19 @@ func ExportDetailStore(c *gin.Context) {
 	filename = strings.ReplaceAll(filename, " ", "_")
 	// Save file
 	dir := "./public/exports"
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		helpers.ErrorResponse(c, 500, "Failed create directory", err)
+		return
+	}
 
 	fullPath := filepath.Join(dir, filename)
+	// cek jika file sudah ada maka hapus
+	if _, err := os.Stat(fullPath); err == nil {
+		if err := os.Remove(fullPath); err != nil {
+			helpers.ErrorResponse(c, 500, "Failed remove existing file", err)
+			return
+		}
+	}
 	if err := f.SaveAs(fullPath); err != nil {
 		helpers.ErrorResponse(c, 500, "Internal Server Erorr", err)
 		return
@@ -722,14 +732,4 @@ func ExportDetailStore(c *gin.Context) {
 		"message": "File berhasil diunduh",
 		"url":     downloadURL,
 	})
-
-	// var buf bytes.Buffer
-	// if err := f.Write(&buf); err != nil {
-	// 	helpers.ErrorResponse(c, 500, "failed to generate excel file", err)
-	// 	return
-	// }
-
-	// c.Header("Content-Description", "File Transfer")
-	// c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
-	// c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
 }
