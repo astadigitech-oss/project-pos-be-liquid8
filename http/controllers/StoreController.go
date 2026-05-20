@@ -604,6 +604,7 @@ func ExportDetailStore(c *gin.Context) {
 
 	// build excel
 	f := excelize.NewFile()
+	defer f.Close()
 	sheet1 := "Detail Toko"
 	// sheet2 := "Products"
 	sheet3 := "Penjualan"
@@ -713,6 +714,11 @@ func ExportDetailStore(c *gin.Context) {
 	}
 
 	fullPath := filepath.Join(dir, filename)
+	tmpPath := fullPath + ".new"
+	if err := f.SaveAs(tmpPath); err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal menyimpan file", err)
+		return
+	}
 	// cek jika file sudah ada maka hapus
 	if _, err := os.Stat(fullPath); err == nil {
 		if err := os.Remove(fullPath); err != nil {
@@ -720,12 +726,13 @@ func ExportDetailStore(c *gin.Context) {
 			return
 		}
 	}
-	if err := f.SaveAs(fullPath); err != nil {
-		helpers.ErrorResponse(c, 500, "Internal Server Erorr", err)
+
+	if err := os.Rename(tmpPath, fullPath); err != nil {
+		helpers.ErrorResponse(c, 500, "Gagal mengubah nama file", err)
 		return
 	}
 
-	downloadURL := fmt.Sprintf("%s/public/exports/%s", os.Getenv("APP_URL"), filename)
+	downloadURL := fmt.Sprintf("%s/public/exports/%s?v=%d", os.Getenv("APP_URL"), filename, time.Now().Unix())
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
