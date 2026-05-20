@@ -386,14 +386,6 @@ func GetShiftsByCashier(c *gin.Context) {
 	startDateQuery := c.Query("start_date")
 	endDateQuery := c.Query("end_date")
 
-	getStartOfDay := func(t time.Time) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-	}
-
-	getEndOfDay := func(t time.Time) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, int(time.Second-time.Nanosecond), t.Location())
-	}
-
 	// response row structure
 	type shiftRow struct {
 		ID           uint64    `json:"id"`
@@ -427,7 +419,7 @@ func GetShiftsByCashier(c *gin.Context) {
 			helpers.ErrorResponse(c, 400, "Invalid start_date", err)
 			return
 		}
-		s := getStartOfDay(start).UTC()
+		s := helpers.GetStartOfDay(start).UTC()
 		startUTC = &s
 	}
 	if endDateQuery != "" {
@@ -436,7 +428,7 @@ func GetShiftsByCashier(c *gin.Context) {
 			helpers.ErrorResponse(c, 400, "Invalid end_date", err)
 			return
 		}
-		e := getEndOfDay(end).UTC()
+		e := helpers.GetEndOfDay(end).UTC()
 		endUTC = &e
 	}
 	// default: hari ini

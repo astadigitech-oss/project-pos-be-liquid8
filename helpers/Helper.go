@@ -157,6 +157,13 @@ func ToLocalTime(t time.Time, tz string) time.Time {
 	location, _ := time.LoadLocation(tz)
 	return t.In(location)
 }
+func GetStartOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+func GetEndOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, int(time.Second-time.Nanosecond), t.Location())
+}
+
 func BuildPaginationLinks(
 	c *gin.Context,
 	currentPage, limit, lastPage, lenData, totalData int,

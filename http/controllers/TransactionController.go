@@ -1818,6 +1818,31 @@ func GetAllTransactions(c *gin.Context) {
     store_id := strings.TrimSpace(c.DefaultQuery("store_id", ""))
     status := strings.TrimSpace(c.DefaultQuery("status", ""))
     q := strings.TrimSpace(c.DefaultQuery("q", ""))
+
+    // Date Range
+    startDateQuery := c.Query("start_date")
+	endDateQuery := c.Query("end_date")
+
+    var startUTC, endUTC *time.Time
+	if startDateQuery != "" {
+		start, err := helpers.ParseFlexibleDate(startDateQuery, "Asia/Jakarta")
+		if err != nil {
+			helpers.ErrorResponse(c, 400, "Invalid start_date", err)
+			return
+		}
+		s := helpers.GetStartOfDay(start).UTC()
+		startUTC = &s
+	}
+	if endDateQuery != "" {
+		end, err := helpers.ParseFlexibleDate(endDateQuery, "Asia/Jakarta")
+		if err != nil {
+			helpers.ErrorResponse(c, 400, "Invalid end_date", err)
+			return
+		}
+		e := helpers.GetEndOfDay(end).UTC()
+		endUTC = &e
+	}
+
     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
     limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
     if page < 1 { page = 1 }
@@ -1845,12 +1870,12 @@ func GetAllTransactions(c *gin.Context) {
 
     baseWhere := "WHERE 1=1"
     args := []interface{}{}
-
+    // Filter by status
     if status != ""  {
         baseWhere += " AND t.status = ?"
         args = append(args, status)
     }
-
+    //Filter by store id
     if store_id != "" {
         storeID, _ := strconv.Atoi(store_id)
         if err := config.DB.First(&store, storeID).Error; err != nil {
@@ -1861,15 +1886,29 @@ func GetAllTransactions(c *gin.Context) {
         baseWhere += " AND t.store_id = ?"
         args = append(args, store.ID)
     }
-
+    //Filter by keyword
     if q != "" {
         like := "%"+q+"%"
         baseWhere += " AND (t.invoice LIKE ? OR m.name LIKE ? OR s.store_name LIKE ?)"
         args = append(args, like, like, like)
     }
+    // filter by date range
+    if startUTC != nil {
+		baseWhere += " AND t.created_at >= ?"
+		args = append(args, *startUTC)
+	}
+	if endUTC != nil {
+		baseWhere += " AND t.created_at <= ?"
+		args = append(args, *endUTC)
+	}
 
     var total int64
-    countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM transactions t LEFT JOIN users u ON u.id = t.user_id LEFT JOIN members m ON m.id = t.member_id LEFT JOIN store_profiles s ON s.id = t.store_id LEFT JOIN shifts sh ON sh.id = t.shift_id %s`, baseWhere)
+    countSQL := fmt.Sprintf(`
+        SELECT COUNT(*) FROM transactions t 
+        LEFT JOIN members m ON m.id = t.member_id 
+        LEFT JOIN store_profiles s ON s.id = t.store_id 
+        %s
+    `, baseWhere)
     if err := config.DB.Raw(countSQL, args...).Scan(&total).Error; err != nil {
         helpers.ErrorResponse(c, 500, "Failed to count transactions", err)
         return
@@ -1925,6 +1964,29 @@ func GetAllTransactions(c *gin.Context) {
 }
 func ExportTransactions(c *gin.Context) {
     storeIDStr := strings.TrimSpace(c.DefaultQuery("store_id", ""))
+    // Date Range
+    startDateQuery := c.Query("start_date")
+	endDateQuery := c.Query("end_date")
+
+    var startUTC, endUTC *time.Time
+	if startDateQuery != "" {
+		start, err := helpers.ParseFlexibleDate(startDateQuery, "Asia/Jakarta")
+		if err != nil {
+			helpers.ErrorResponse(c, 400, "Invalid start_date", err)
+			return
+		}
+		s := helpers.GetStartOfDay(start).UTC()
+		startUTC = &s
+	}
+	if endDateQuery != "" {
+		end, err := helpers.ParseFlexibleDate(endDateQuery, "Asia/Jakarta")
+		if err != nil {
+			helpers.ErrorResponse(c, 400, "Invalid end_date", err)
+			return
+		}
+		e := helpers.GetEndOfDay(end).UTC()
+		endUTC = &e
+	}
 
     // helper to write rows to sheet
     writeSheet := func(f *excelize.File, sheet string, rows [][]interface{}) error {
@@ -1933,7 +1995,7 @@ func ExportTransactions(c *gin.Context) {
             f.NewSheet(sheet)
         }
         // header style
-        headers := []string{"ID", "Invoice", "Store", "Kasir", "Member", "Total Item", "Subtotal", "Tax", "Pembulatan", "Total Amount", "Payment Method", "Status", "Transaction Date"}
+        headers := []string{"No", "Invoice", "Store", "Kasir", "Member", "Total Item", "Subtotal", "Tax", "Pembulatan", "Total Amount", "Payment Method", "Status", "Transaction Date"}
         for i, h := range headers {
             cell, _ := excelize.CoordinatesToCellName(i+1, 1)
             if err := f.SetCellValue(sheet, cell, h); err != nil { return err }
@@ -1942,7 +2004,11 @@ func ExportTransactions(c *gin.Context) {
         for rIdx, r := range rows {
             for cIdx, v := range r {
                 cell, _ := excelize.CoordinatesToCellName(cIdx+1, rIdx+2)
-                if err := f.SetCellValue(sheet, cell, v); err != nil { return err }
+                if cIdx == 0 {
+                    if err := f.SetCellValue(sheet, cell, rIdx+1); err != nil { return err }
+                }else {
+                    if err := f.SetCellValue(sheet, cell, v); err != nil { return err }
+                }
             }
         }
         // optional: autosize columns 1..len(headers)
@@ -1962,7 +2028,7 @@ func ExportTransactions(c *gin.Context) {
     file := excelize.NewFile()
     // fetch list of stores to export (if storeID specified, just that store)
     var stores []models.StoreProfile
-    filename := "transactions.xlsx"
+    filename := fmt.Sprintf("transactions_%d.xlsx", time.Now().Unix())
     if storeIDStr != "" {
         sid, _ := strconv.Atoi(storeIDStr)
         var s models.StoreProfile
@@ -1971,7 +2037,7 @@ func ExportTransactions(c *gin.Context) {
             return
         }
         stores = append(stores, s)
-        filename = fmt.Sprintf("transactions_%s.xlsx", strings.ToLower(s.StoreName))
+        filename = fmt.Sprintf("transactions_%s_%d.xlsx", strings.ToLower(s.StoreName), time.Now().Unix())
         filename = strings.ReplaceAll(filename, " ", "_")
     } else {
         if err := config.DB.Find(&stores).Error; err != nil {
@@ -1989,13 +2055,22 @@ func ExportTransactions(c *gin.Context) {
         // collect transactions for this store
         txWhere := "WHERE t.store_id = ?"
         txArgs := []interface{}{s.ID}
+        // filter by date range
+        if startUTC != nil {
+            txWhere += " AND t.created_at >= ?"
+            txArgs = append(txArgs, *startUTC)
+        }
+        if endUTC != nil {
+            txWhere += " AND t.created_at <= ?"
+            txArgs = append(txArgs, *endUTC)
+        }
 
         dataSQL := `
             SELECT
                 t.id,
                 t.invoice,
                 COALESCE(u.name,'') as kasir,
-                COALESCE(m.name,'') as member_name,
+                COALESCE(m.name,'') as member,
                 t.total_item,
                 COALESCE(t.subtotal,0) as subtotal,
                 COALESCE(t.tax_price,0) as tax,
@@ -2008,7 +2083,7 @@ func ExportTransactions(c *gin.Context) {
             LEFT JOIN users u ON u.id = t.user_id
             LEFT JOIN members m ON m.id = t.member_id
             ` + txWhere + `
-            ORDER BY t.created_at ASC
+            ORDER BY t.created_at DESC
         `
 
         type rowType struct {
@@ -2074,11 +2149,38 @@ func ExportTransactions(c *gin.Context) {
 
     // Save file
 	dir := "./public/exports"
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		helpers.ErrorResponse(c, 500, "Failed create directory", err)
+		return
+	}
+
+    prefix := "transactions_"
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		helpers.ErrorResponse(c, 500, "Failed read directory", err)
+		return
+	}
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		filename := file.Name()
+		// cek awalan nama file
+		if strings.HasPrefix(filename, prefix) {
+			fullPath := filepath.Join(dir, filename)
+
+			if err := os.Remove(fullPath); err != nil {
+				fmt.Println("failed remove file:", fullPath, err)
+				continue
+			}
+
+			fmt.Println("deleted:", fullPath)
+		}
+	}
 
 	fullPath := filepath.Join(dir, filename)
 	if err := file.SaveAs(fullPath); err != nil {
-		helpers.ErrorResponse(c, 500, "Internal Server Error", err)
+		helpers.ErrorResponse(c, 500, "Gagal menyimpan file", err)
 		return
 	}
 
