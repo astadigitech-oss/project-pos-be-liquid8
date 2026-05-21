@@ -392,10 +392,11 @@ func ErrorResponse(c *gin.Context, status int, message string, err error) {
 	}
 	fmt.Println(message)
 	if err != nil {
+		fmt.Println(err)
 		Errlog.WithFields(logrus.Fields{
-		"path":   c.Request.URL.Path,
-		"method": c.Request.Method,
-	}).WithError(err).Error(fmt.Sprintf("%s", message))
+			"path":   c.Request.URL.Path,
+			"method": c.Request.Method,
+		}).WithError(err).Error(fmt.Sprintf("%s", message))
 		
 		if os.Getenv("APP_ENV") == "development" {
 			response["error"] = err.Error()

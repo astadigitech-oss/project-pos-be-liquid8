@@ -228,6 +228,7 @@ func ReceiveMigrateDocument(c *gin.Context) {
             "message": "Invalid payload",
             "errors":  errors,
         })
+        fmt.Println(errors)
         return
     }
 
@@ -238,6 +239,8 @@ func ReceiveMigrateDocument(c *gin.Context) {
                 "message": "Terjadi kesalahan internal",
                 "error":   fmt.Sprintf("%v", r),
             })
+
+            fmt.Printf("Panic recovered: %v\n", r)
         }
     }()
 
@@ -317,6 +320,7 @@ func ReceiveMigrateDocument(c *gin.Context) {
             "sold_barcodes":   soldBarcodes,
             "active_barcodes": activeBarcodes,
         })
+        fmt.Println("Terdapat produk yang tidak bisa diproses")
         return
     }
 
