@@ -353,46 +353,56 @@ func GetSalePeriodStore(c *gin.Context) {
 	payload := resFormat{
 		Period: period,
 	}
-	// WEEK / DAY (per hari)
-	if period == "week" || period == "custom" {
-		payload.Start = start.Format("02 January 2006")
-		payload.End = end.Format("02 January 2006")
+	switch period {
+		case "week":
+			payload.Start = start.Format("02 January 2006")
+			payload.End = end.Format("02 January 2006")
 
-		for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+			for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
 
-			key := d.Format("2006-01-02")
+				key := d.Format("2006-01-02")
 
-			results = append(results, gin.H{
-				"label":		helpers.GetDayIndo(d),
-				"date":        d.Format("02 January 2006"),
-				"total_sales": resultMap[key], // default 0 kalau tidak ada
-			})
-		}
-	}
+				results = append(results, gin.H{
+					"label":		helpers.GetDayIndo(d),
+					"date":        d.Format("02 January 2006"),
+					"total_sales": resultMap[key], // default 0 kalau tidak ada
+				})
+			}
+		case"custom":
+			payload.Start = start.Format("02 January 2006")
+			payload.End = end.Format("02 January 2006")
 
-	// MONTH (per bulan)
-	if period == "month" {
-		payload.Start = start.Format("January 2006")
-		payload.End = end.Format("January 2006")
+			for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
 
-		monthMap := make(map[int]float64)
+				key := d.Format("2006-01-02")
 
-		// grouping ulang per bulan
-		for _, r := range rows {
-			month := int(r.Date.Month())
-			monthMap[month] += r.Total
-		}
+				results = append(results, gin.H{
+					"label":	d.Format("02 January 2006"),
+					"date":     d.Format("02 January 2006"),
+					"total_sales": resultMap[key], // default 0 kalau tidak ada
+				})
+			}
+		case "month":
+			payload.Start = start.Format("January 2006")
+			payload.End = end.Format("January 2006")
 
-		for m := 1; m <= 12; m++ {
+			monthMap := make(map[int]float64)
 
-			d := time.Date(now.Year(), time.Month(m), 1, 0, 0, 0, 0, now.Location())
+			// grouping ulang per bulan
+			for _, r := range rows {
+				month := int(r.Date.Month())
+				monthMap[month] += r.Total
+			}
 
-			results = append(results, gin.H{
-				"date":        d.Format("January 2006"),
-				"label":		d.Format("January"),
-				"total_sales": monthMap[m],
-			})
-		}
+			for m := 1; m <= 12; m++ {
+				d := time.Date(now.Year(), time.Month(m), 1, 0, 0, 0, 0, now.Location())
+
+				results = append(results, gin.H{
+					"date":        d.Format("January 2006"),
+					"label":		d.Format("January"),
+					"total_sales": monthMap[m],
+				})
+			}
 	}
 	payload.Sales = results
 
