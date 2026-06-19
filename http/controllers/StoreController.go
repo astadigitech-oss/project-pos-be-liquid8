@@ -32,12 +32,12 @@ func ListStores(c *gin.Context) {
 	offset := (page - 1) * limit
 
 	type formatRes struct {
-		ID              uint       `json:"id"`
-		StoreName		string	   `json:"store_name"`
-		Phone        	string     `json:"phone"`
-		Address         string     `json:"address"`
-		TotalProduct	int64		`json:"total_product"`
-		TotalSales		float64		`json:"total_sales"`
+		ID           uint    `json:"id"`
+		StoreName    string  `json:"store_name"`
+		Phone        string  `json:"phone"`
+		Address      string  `json:"address"`
+		TotalProduct int64   `json:"total_product"`
+		TotalSales   float64 `json:"total_sales"`
 	}
 
 	var results []formatRes
@@ -90,14 +90,14 @@ func ListStores(c *gin.Context) {
 	pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(results), int(total))
 
 	c.JSON(http.StatusOK, response.Success("List stores", gin.H{
-		"data": results,
+		"data":       results,
 		"pagination": pagination,
 	}))
 }
 func ListStoresDropdown(c *gin.Context) {
 	type formatRes struct {
-		ID              uint       `json:"id"`
-		StoreName		string	   `json:"store_name"`
+		ID        uint   `json:"id"`
+		StoreName string `json:"store_name"`
 	}
 
 	var results []formatRes
@@ -107,7 +107,7 @@ func ListStoresDropdown(c *gin.Context) {
 			store_name
 		`).Scan(&results).Error; err != nil {
 
-		helpers.ErrorResponse(c, 500, "Gagal mengambil store list", err);
+		helpers.ErrorResponse(c, 500, "Gagal mengambil store list", err)
 		return
 	}
 
@@ -178,14 +178,14 @@ func DetailStore(c *gin.Context) {
 	offset := (page - 1) * limit
 
 	type productRow struct {
-		ID uint64 `json:"id"`
-		StoreID uint64 `json:"store_id"`
-		Barcode string `json:"barcode"`
-		Name string `json:"name"`
-		Price float64 `json:"price"`
-		TagColor string `json:"tag_color"`
-		Quantity int64 `json:"quantity"`
-		Status string `json:"status"`
+		ID        uint64    `json:"id"`
+		StoreID   uint64    `json:"store_id"`
+		Barcode   string    `json:"barcode"`
+		Name      string    `json:"name"`
+		Price     float64   `json:"price"`
+		TagColor  string    `json:"tag_color"`
+		Quantity  int64     `json:"quantity"`
+		Status    string    `json:"status"`
 		CreatedAt time.Time `json:"created_at"`
 	}
 
@@ -234,16 +234,16 @@ func DetailStore(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response.Success("Detail store", gin.H{
 		"store": gin.H{
-			"id": store.ID,
-			"store_name": store.StoreName,
-			"phone": store.Phone,
-			"address": store.Address,
-			"total_sales_today": totalSales,
-			"total_stock": totalAggregate.TotalStock,
+			"id":                  store.ID,
+			"store_name":          store.StoreName,
+			"phone":               store.Phone,
+			"address":             store.Address,
+			"total_sales_today":   totalSales,
+			"total_stock":         totalAggregate.TotalStock,
 			"total_price_product": totalAggregate.TotalPrice,
 		},
 		"products": gin.H{
-			"data": rows, 
+			"data":       rows,
 			"pagination": pagination,
 		},
 	}))
@@ -275,59 +275,59 @@ func GetSalePeriodStore(c *gin.Context) {
 		Where("status = ?", "done")
 
 	switch period {
-		case "week":
-			// Week: Monday..Sunday of current week
-			// time.Sunday = 0
-			// time.Monday = 1
-			// time.Tuesday = 2
-			// time.Wednesday = 3
-			// time.Thursday = 4
-			// time.Friday = 5
-			// time.Saturday = 6
-			weekday := int(now.Weekday())
-			if weekday == 0 {
-				weekday = 7
-			}
-			monday := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
-			start = monday
-			end = monday.AddDate(0, 0, 7).Add(-time.Second)
+	case "week":
+		// Week: Monday..Sunday of current week
+		// time.Sunday = 0
+		// time.Monday = 1
+		// time.Tuesday = 2
+		// time.Wednesday = 3
+		// time.Thursday = 4
+		// time.Friday = 5
+		// time.Saturday = 6
+		weekday := int(now.Weekday())
+		if weekday == 0 {
+			weekday = 7
+		}
+		monday := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
+		start = monday
+		end = monday.AddDate(0, 0, 7).Add(-time.Second)
 
-			baseQuery.Where("created_at >= ? AND created_at <= ?", start.UTC(), end.UTC())
+		baseQuery.Where("created_at >= ? AND created_at <= ?", start.UTC(), end.UTC())
 
-		case "month":
-			start = time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, now.Location())
-			end = time.Date(now.Year(), time.December, 31, 23, 59, 59, 0, now.Location())
+	case "month":
+		start = time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, now.Location())
+		end = time.Date(now.Year(), time.December, 31, 23, 59, 59, 0, now.Location())
 
-			baseQuery.Where("created_at >= ? AND created_at <= ?", start.UTC(), end.UTC())
-		
-		case "custom":
-			startDateQuery := c.Query("start_date")
-			endDateQuery := c.Query("end_date")
+		baseQuery.Where("created_at >= ? AND created_at <= ?", start.UTC(), end.UTC())
 
-			if startDateQuery == "" || endDateQuery == "" {
-				helpers.ErrorResponse(c, 400, "Date range harus valid untuk period custom", nil)
-				return
-			}
+	case "custom":
+		startDateQuery := c.Query("start_date")
+		endDateQuery := c.Query("end_date")
 
-			startDate, err := helpers.ParseFlexibleDate(startDateQuery, "Asia/Jakarta")
-			if err != nil {
-				helpers.ErrorResponse(c, 400, "Invalid start_date", err)
-				return
-			}
-			endDate, err := helpers.ParseFlexibleDate(endDateQuery, "Asia/Jakarta")
-			if err != nil {
-				helpers.ErrorResponse(c, 400, "Invalid end_date", err)
-				return
-			}
-
-			start = helpers.GetStartOfDay(startDate)
-			end = helpers.GetEndOfDay(endDate)
-
-			baseQuery.Where("created_at >= ? AND created_at <= ?", start.UTC(), end.UTC())
-
-		default:
-			helpers.ErrorResponse(c, 400, "Invalid period", nil)
+		if startDateQuery == "" || endDateQuery == "" {
+			helpers.ErrorResponse(c, 400, "Date range harus valid untuk period custom", nil)
 			return
+		}
+
+		startDate, err := helpers.ParseFlexibleDate(startDateQuery, "Asia/Jakarta")
+		if err != nil {
+			helpers.ErrorResponse(c, 400, "Invalid start_date", err)
+			return
+		}
+		endDate, err := helpers.ParseFlexibleDate(endDateQuery, "Asia/Jakarta")
+		if err != nil {
+			helpers.ErrorResponse(c, 400, "Invalid end_date", err)
+			return
+		}
+
+		start = helpers.GetStartOfDay(startDate)
+		end = helpers.GetEndOfDay(endDate)
+
+		baseQuery.Where("created_at >= ? AND created_at <= ?", start.UTC(), end.UTC())
+
+	default:
+		helpers.ErrorResponse(c, 400, "Invalid period", nil)
+		return
 	}
 
 	if err := baseQuery.Group("date").Scan(&rows).Error; err != nil {
@@ -345,16 +345,16 @@ func GetSalePeriodStore(c *gin.Context) {
 	// Final result
 	var results []gin.H
 	type resFormat struct {
-		Period    string  `json:"period"`
-		Start     string  `json:"start"`
-		End       string  `json:"end"`
-		Sales     []gin.H `json:"sales"`
+		Period string  `json:"period"`
+		Start  string  `json:"start"`
+		End    string  `json:"end"`
+		Sales  []gin.H `json:"sales"`
 	}
 	payload := resFormat{
 		Period: period,
 	}
-	// WEEK / DAY (per hari)
-	if period == "week" || period == "custom" {
+	switch period {
+	case "week":
 		payload.Start = start.Format("02 January 2006")
 		payload.End = end.Format("02 January 2006")
 
@@ -363,15 +363,26 @@ func GetSalePeriodStore(c *gin.Context) {
 			key := d.Format("2006-01-02")
 
 			results = append(results, gin.H{
-				"label":		helpers.GetDayIndo(d),
+				"label":       helpers.GetDayIndo(d),
 				"date":        d.Format("02 January 2006"),
 				"total_sales": resultMap[key], // default 0 kalau tidak ada
 			})
 		}
-	}
+	case "custom":
+		payload.Start = start.Format("02 January 2006")
+		payload.End = end.Format("02 January 2006")
 
-	// MONTH (per bulan)
-	if period == "month" {
+		for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+
+			key := d.Format("2006-01-02")
+
+			results = append(results, gin.H{
+				"label":       d.Format("02 January 2006"),
+				"date":        d.Format("02 January 2006"),
+				"total_sales": resultMap[key], // default 0 kalau tidak ada
+			})
+		}
+	case "month":
 		payload.Start = start.Format("January 2006")
 		payload.End = end.Format("January 2006")
 
@@ -384,12 +395,11 @@ func GetSalePeriodStore(c *gin.Context) {
 		}
 
 		for m := 1; m <= 12; m++ {
-
 			d := time.Date(now.Year(), time.Month(m), 1, 0, 0, 0, 0, now.Location())
 
 			results = append(results, gin.H{
 				"date":        d.Format("January 2006"),
-				"label":		d.Format("January"),
+				"label":       d.Format("January"),
 				"total_sales": monthMap[m],
 			})
 		}
@@ -410,7 +420,9 @@ func StoreShiftsHistories(c *gin.Context) {
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
-	if page < 1 { page = 1 }
+	if page < 1 {
+		page = 1
+	}
 	offset := (page - 1) * limit
 
 	now, err := helpers.GetCurentTime("Asia/Jakarta")
@@ -426,17 +438,17 @@ func StoreShiftsHistories(c *gin.Context) {
 	endUTC := end.UTC()
 
 	type shiftRow struct {
-		ID uint64 `json:"id"`
-		CashierOpen string `json:"cashier_open"`
-		CashierClosed string `json:"cashier_closed"`
-		StartTime time.Time `json:"start_time"`
-		EndTime *time.Time `json:"end_time"`
-		Status string `json:"status"`
-		InitialCash float64 `json:"initial_cash"`
-		ExpectedCash float64 `json:"expected_cash"`
-		ActualCash float64 `json:"actual_cash"`
-		Difference float64 `json:"difference"`
-		CreatedAt time.Time `json:"created_at"`
+		ID            uint64     `json:"id"`
+		CashierOpen   string     `json:"cashier_open"`
+		CashierClosed string     `json:"cashier_closed"`
+		StartTime     time.Time  `json:"start_time"`
+		EndTime       *time.Time `json:"end_time"`
+		Status        string     `json:"status"`
+		InitialCash   float64    `json:"initial_cash"`
+		ExpectedCash  float64    `json:"expected_cash"`
+		ActualCash    float64    `json:"actual_cash"`
+		Difference    float64    `json:"difference"`
+		CreatedAt     time.Time  `json:"created_at"`
 	}
 
 	var rows []shiftRow
@@ -489,64 +501,64 @@ func StoreShiftsHistories(c *gin.Context) {
 	pagination := helpers.BuildPaginationLinks(c, page, limit, lastPage, len(rows), int(total))
 
 	c.JSON(http.StatusOK, response.Success("Shifts histories", gin.H{
-		"data": rows,
+		"data":       rows,
 		"pagination": pagination,
 	}))
 }
 func CreateStore(c *gin.Context) {
-    var payload models.StoreProfile
-    if err := c.ShouldBindJSON(&payload); err != nil {
-        helpers.ErrorResponse(c, 400, "invalid payload", err)
-        return
-    }
-    if err := config.DB.Create(&payload).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "failed to create store", err)
-        return
-    }
-    c.JSON(http.StatusCreated, gin.H{"status": true, "resource": payload})
+	var payload models.StoreProfile
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		helpers.ErrorResponse(c, 400, "invalid payload", err)
+		return
+	}
+	if err := config.DB.Create(&payload).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "failed to create store", err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"status": true, "resource": payload})
 }
 func UpdateStore(c *gin.Context) {
-    id, _ := strconv.Atoi(c.Param("id"))
-    var store models.StoreProfile
-    if err := config.DB.First(&store, id).Error; err != nil {
-        helpers.ErrorResponse(c, 404, "store not found", err)
-        return
-    }
-    var payload models.StoreProfile
-    if err := c.ShouldBindJSON(&payload); err != nil {
-        helpers.ErrorResponse(c, 400, "invalid payload", err)
-        return
-    }
-    // update fields
-    store.StoreName = payload.StoreName
-    store.Phone = payload.Phone
-    store.Address = payload.Address
-    store.Timezone = payload.Timezone
-    store.Token = payload.Token
+	id, _ := strconv.Atoi(c.Param("id"))
+	var store models.StoreProfile
+	if err := config.DB.First(&store, id).Error; err != nil {
+		helpers.ErrorResponse(c, 404, "store not found", err)
+		return
+	}
+	var payload models.StoreProfile
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		helpers.ErrorResponse(c, 400, "invalid payload", err)
+		return
+	}
+	// update fields
+	store.StoreName = payload.StoreName
+	store.Phone = payload.Phone
+	store.Address = payload.Address
+	store.Timezone = payload.Timezone
+	store.Token = payload.Token
 
-    if err := config.DB.Save(&store).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "failed to update store", err)
-        return
-    }
-    c.JSON(http.StatusOK, gin.H{"status": true, "resource": store})
+	if err := config.DB.Save(&store).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "failed to update store", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": true, "resource": store})
 }
 func DeleteStore(c *gin.Context) {
-    id, _ := strconv.Atoi(c.Param("id"))
-    if err := config.DB.Delete(&models.StoreProfile{}, id).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "failed to delete store", err)
-        return
-    }
-    c.JSON(http.StatusOK, gin.H{"status": true, "message": "store deleted"})
+	id, _ := strconv.Atoi(c.Param("id"))
+	if err := config.DB.Delete(&models.StoreProfile{}, id).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "failed to delete store", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": true, "message": "store deleted"})
 }
 func ListStoresForSync(c *gin.Context) {
-    var stores []models.StoreProfile
+	var stores []models.StoreProfile
 
-    if err := config.DB.Model(&models.StoreProfile{}).Find(&stores).Error; err != nil {
-        helpers.ErrorResponse(c, 500, "failed to fetch stores", err)
-        return
-    }
+	if err := config.DB.Model(&models.StoreProfile{}).Find(&stores).Error; err != nil {
+		helpers.ErrorResponse(c, 500, "failed to fetch stores", err)
+		return
+	}
 
-    c.JSON(http.StatusOK, response.Success("List stores", stores))
+	c.JSON(http.StatusOK, response.Success("List stores", stores))
 }
 func ExportDetailStore(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
@@ -566,13 +578,14 @@ func ExportDetailStore(c *gin.Context) {
 
 	// aggregate products by tag_color
 	type colorAgg struct {
-		TagColor   string  `json:"tag_color"`
-		TotalStock int64   `json:"total_stock"`
-		TotalPrice float64 `json:"total_price"`
+		TagColor      string  `json:"tag_color"`
+		TotalStock    int64   `json:"total_stock"`
+		TotalPrice    float64 `json:"total_price"`
+		TotalOldPrice float64 `json:"total_old_price"`
 	}
 	var colorAggs []colorAgg
 	if err := config.DB.Raw(`
-		SELECT COALESCE(tag_color, '') AS tag_color, COUNT(*) AS total_stock, COALESCE(SUM(price),0) AS total_price
+		SELECT COALESCE(tag_color, '') AS tag_color, COUNT(*) AS total_stock, COALESCE(SUM(price),0) AS total_price, COALESCE(SUM(old_price),0) AS total_old_price
 		FROM products
 		WHERE store_id = ? AND status = 'display'
 		GROUP BY tag_color
@@ -583,19 +596,20 @@ func ExportDetailStore(c *gin.Context) {
 
 	// fetch products
 	type prodRow struct {
-		ID        uint64    `json:"id"`
-		OldBarcode   string    `json:"old_barcode"`
-		Barcode   string    `json:"barcode"`
-		Name      string    `json:"name"`
-		Price     float64   `json:"price"`
-		TagColor  string    `json:"tag_color"`
-		Quantity  int64     `json:"quantity"`
-		Status    string    `json:"status"`
-		CreatedAt time.Time `json:"created_at"`
+		ID         uint64    `json:"id"`
+		OldBarcode string    `json:"old_barcode"`
+		Barcode    string    `json:"barcode"`
+		Name       string    `json:"name"`
+		Price      float64   `json:"price"`
+		OldPrice   float64   `json:"old_price"`
+		TagColor   string    `json:"tag_color"`
+		Quantity   int64     `json:"quantity"`
+		Status     string    `json:"status"`
+		CreatedAt  time.Time `json:"created_at"`
 	}
 	var products []prodRow
 	prodSQL := `
-		SELECT id, COALESCE(old_barcode, "") as old_barcode, barcode, name, price, COALESCE(tag_color,'') AS tag_color, quantity, status, created_at
+		SELECT id, COALESCE(old_barcode, "") as old_barcode, barcode, name, price, old_price, COALESCE(tag_color,'') AS tag_color, quantity, status, created_at
 		FROM products
 		WHERE store_id = ? AND status = 'display'
 		ORDER BY created_at DESC
@@ -607,20 +621,21 @@ func ExportDetailStore(c *gin.Context) {
 
 	// fetch transactions
 	type txItemRow struct {
-        ID uint64 
-        Invoice string
-        Status string 
-        Kasir string 
-        OldBarcode string
-        Barcode string
-        ProductName string
-        TagColor string
-        Quantity uint64
-        Price float64
-        PaymentMethod string
-        Type string
-        CreatedAt time.Time
-    }
+		ID            uint64
+		Invoice       string
+		Status        string
+		Kasir         string
+		OldBarcode    string
+		Barcode       string
+		ProductName   string
+		TagColor      string
+		Quantity      uint64
+		Price         float64
+		OldPrice      float64
+		PaymentMethod string
+		Type          string
+		CreatedAt     time.Time
+	}
 	var txs []txItemRow
 	txSQL := `
         SELECT 
@@ -634,6 +649,7 @@ func ExportDetailStore(c *gin.Context) {
 			p.tag_color,
             ti.quantity,
             ti.price,
+			COALESCE(p.old_price, 0) as old_price,
             ti.subtotal,
 			t.payment_method,
             ti.type,
@@ -650,43 +666,42 @@ func ExportDetailStore(c *gin.Context) {
 		return
 	}
 	//ubah ke local time
-    for i := range txs {
-        txs[i].CreatedAt = helpers.ToLocalTime(txs[i].CreatedAt, "Asia/Jakarta")
-    }
+	for i := range txs {
+		txs[i].CreatedAt = helpers.ToLocalTime(txs[i].CreatedAt, "Asia/Jakarta")
+	}
 
 	//grouping per kategori
 	type groupingItemPrice struct {
-        Name string `json:"name"`
-        Price    float64 `json:"price"`
-        Quantity uint64   `json:"quantity"`
-        Total float64   `json:"total"`
-    }
-    priceMap := make(map[float64]uint64)
+		Name     string  `json:"name"`
+		Price    float64 `json:"price"`
+		Quantity uint64  `json:"quantity"`
+		Total    float64 `json:"total"`
+	}
+	priceMap := make(map[float64]uint64)
 	var totalProductSale uint64
-    var productSale []groupingItemPrice
-    for _, item := range txs {
-        if item.Status == "done" {
-            switch item.Type {
-            case "product":
-                totalProductSale += 1
-                priceMap[item.Price] += item.Quantity
-            }
-        }
-    }
-    // ambil item packaging
-    for price, qty := range priceMap {
-        productSale = append(productSale, groupingItemPrice{
-            Name: formatPriceToProductName(price),
-            Price:    price,
-            Quantity: qty,
-            Total: price * float64(qty),
-        })
-    }
-    // sorting dari harga terendah
-    sort.Slice(productSale, func(i, j int) bool {
-        return productSale[i].Price < productSale[j].Price
-    })
-
+	var productSale []groupingItemPrice
+	for _, item := range txs {
+		if item.Status == "done" {
+			switch item.Type {
+			case "product":
+				totalProductSale += 1
+				priceMap[item.Price] += item.Quantity
+			}
+		}
+	}
+	// ambil item packaging
+	for price, qty := range priceMap {
+		productSale = append(productSale, groupingItemPrice{
+			Name:     formatPriceToProductName(price),
+			Price:    price,
+			Quantity: qty,
+			Total:    price * float64(qty),
+		})
+	}
+	// sorting dari harga terendah
+	sort.Slice(productSale, func(i, j int) bool {
+		return productSale[i].Price < productSale[j].Price
+	})
 
 	// build excel
 	f := excelize.NewFile()
@@ -699,8 +714,8 @@ func ExportDetailStore(c *gin.Context) {
 	f.SetSheetName("Sheet1", sheet1)
 
 	fillGrayStyle, _ := helpers.BuildStyle(f, config.ExcelStyles["fill_gray"], config.ExcelStyles["font_bold"])
-	fontHeaderStyle,_ := helpers.BuildStyle(f, config.ExcelStyles["font_bold_size14"])
-	fontBold,_ := helpers.BuildStyle(f, config.ExcelStyles["font_bold"])
+	fontHeaderStyle, _ := helpers.BuildStyle(f, config.ExcelStyles["font_bold_size14"])
+	fontBold, _ := helpers.BuildStyle(f, config.ExcelStyles["font_bold"])
 
 	// Sheet1: store info
 	f.MergeCell(sheet1, "A1", "D1")
@@ -727,15 +742,18 @@ func ExportDetailStore(c *gin.Context) {
 	f.SetCellValue(sheet1, "A8", "Kategori")
 	f.SetCellValue(sheet1, "B8", "Total Stock")
 	f.SetCellValue(sheet1, "C8", "Total Price")
+	f.SetCellValue(sheet1, "D8", "Total Old Price")
 	f.SetCellStyle(sheet1, "A8", "C8", fillGrayStyle)
 	r := 9
 	for _, ca := range colorAggs {
 		cellA, _ := excelize.CoordinatesToCellName(1, r)
 		cellB, _ := excelize.CoordinatesToCellName(2, r)
 		cellC, _ := excelize.CoordinatesToCellName(3, r)
+		cellD, _ := excelize.CoordinatesToCellName(4, r)
 		f.SetCellValue(sheet1, cellA, ca.TagColor)
 		f.SetCellValue(sheet1, cellB, ca.TotalStock)
 		f.SetCellValue(sheet1, cellC, ca.TotalPrice)
+		f.SetCellValue(sheet1, cellD, ca.TotalOldPrice)
 		r++
 	}
 	r++
@@ -769,10 +787,10 @@ func ExportDetailStore(c *gin.Context) {
 	//sheet2: Produk
 	f.NewSheet(sheet2)
 	f.SetCellStyle(sheet2, fmt.Sprintf("A%d", r), fmt.Sprintf("A%d", r), fontBold)
-	f.SetColWidth(sheet2, "A", "I", 20)
+	f.SetColWidth(sheet2, "A", "J", 20)
 	f.SetColWidth(sheet2, "A", "A", 5)
 	f.SetColWidth(sheet2, "D", "D", 30)
-	headers := []string{"ID", "Old Barcode", "Barcode", "Name", "Price", "TagColor", "Quantity", "Status", "CreatedAt"}
+	headers := []string{"ID", "Old Barcode", "Barcode", "Name", "Price", "Old Price", "TagColor", "Quantity", "Status", "CreatedAt"}
 	for i, h := range headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet2, cell, h)
@@ -785,17 +803,18 @@ func ExportDetailStore(c *gin.Context) {
 		f.SetCellValue(sheet2, fmt.Sprintf("C%d", row), p.Barcode)
 		f.SetCellValue(sheet2, fmt.Sprintf("D%d", row), p.Name)
 		f.SetCellValue(sheet2, fmt.Sprintf("E%d", row), p.Price)
-		f.SetCellValue(sheet2, fmt.Sprintf("F%d", row), p.TagColor)
-		f.SetCellValue(sheet2, fmt.Sprintf("G%d", row), p.Quantity)
-		f.SetCellValue(sheet2, fmt.Sprintf("H%d", row), p.Status)
-		f.SetCellValue(sheet2, fmt.Sprintf("I%d", row), helpers.ToLocalTime(p.CreatedAt, store.Timezone).Format("2006-01-02 15:04:05"))
+		f.SetCellValue(sheet2, fmt.Sprintf("F%d", row), p.OldPrice)
+		f.SetCellValue(sheet2, fmt.Sprintf("G%d", row), p.TagColor)
+		f.SetCellValue(sheet2, fmt.Sprintf("H%d", row), p.Quantity)
+		f.SetCellValue(sheet2, fmt.Sprintf("I%d", row), p.Status)
+		f.SetCellValue(sheet2, fmt.Sprintf("J%d", row), helpers.ToLocalTime(p.CreatedAt, store.Timezone).Format("2006-01-02 15:04:05"))
 	}
 
 	// Sheet3: transactions
 	f.NewSheet(sheet3)
-	f.SetColWidth(sheet3, "A", "L", 20)
+	f.SetColWidth(sheet3, "A", "M", 20)
 	f.SetColWidth(sheet3, "A", "A", 5)
-	th := []string{"No", "Invoice", "Kasir", "Old Barcode", "Barcode", "Product Name", "Category", "Price", "Type", "Payment Method", "Status", "Transaction Date"}
+	th := []string{"No", "Invoice", "Kasir", "Old Barcode", "Barcode", "Product Name", "Category", "Price", "Old Price", "Type", "Payment Method", "Status", "Transaction Date"}
 	for i, h := range th {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet3, cell, h)
@@ -811,10 +830,11 @@ func ExportDetailStore(c *gin.Context) {
 		f.SetCellValue(sheet3, fmt.Sprintf("F%d", row), t.ProductName)
 		f.SetCellValue(sheet3, fmt.Sprintf("G%d", row), t.TagColor)
 		f.SetCellValue(sheet3, fmt.Sprintf("H%d", row), t.Price)
-		f.SetCellValue(sheet3, fmt.Sprintf("I%d", row), t.Type)
-		f.SetCellValue(sheet3, fmt.Sprintf("J%d", row), t.PaymentMethod)
-		f.SetCellValue(sheet3, fmt.Sprintf("K%d", row), t.Status)
-		f.SetCellValue(sheet3, fmt.Sprintf("L%d", row), helpers.ToLocalTime(t.CreatedAt, "Asia/Jakarta").Format("2006-01-02 15:04:05"))
+		f.SetCellValue(sheet3, fmt.Sprintf("I%d", row), t.OldPrice)
+		f.SetCellValue(sheet3, fmt.Sprintf("J%d", row), t.Type)
+		f.SetCellValue(sheet3, fmt.Sprintf("K%d", row), t.PaymentMethod)
+		f.SetCellValue(sheet3, fmt.Sprintf("L%d", row), t.Status)
+		f.SetCellValue(sheet3, fmt.Sprintf("M%d", row), helpers.ToLocalTime(t.CreatedAt, "Asia/Jakarta").Format("2006-01-02 15:04:05"))
 	}
 
 	// set active sheet to Detail
